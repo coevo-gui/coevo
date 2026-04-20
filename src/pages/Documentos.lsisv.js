@@ -1,6 +1,7 @@
 // Página: Documentos — /portal/documentos
 // Tipo: Página de membro personalizada (privada)
 
+
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
