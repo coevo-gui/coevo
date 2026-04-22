@@ -24,29 +24,29 @@ $w.onReady(async () => {
     }
 
     const acesso = acessoResult.items[0];
-    let subclientes = [];
-    let clientePai  = null; // dados do cliente-pai para o banner da rede
+    let siglas    = []; // siglas acessíveis — usadas para filtrar #dataset1
+    let clientePai = null;
 
-    // ── Busca subclientes e cliente-pai conforme nível de acesso ──────────
+    // ── Busca cliente-pai para qualquer nível que tenha clienteRef ────────
+    if (acesso.clienteRef) {
+      try {
+        clientePai = await wixData.get('clientes', acesso.clienteRef);
+      } catch (_) {}
+    }
+
+    // ── Determina as siglas acessíveis conforme nível ─────────────────────
     if (acesso.nivel === 'coevo_admin') {
-      subclientes = (
-        await wixData.query('subclientes').ascending('nome').find()
-      ).items;
-      // Admin não tem cliente-pai único — oculta o banner de rede
-      $w('#networkBar').hide();
+      // Admin vê tudo — sem filtro no dataset
+      siglas = null;
+      try { $w('#networkBar').hide(); } catch (_) {}
 
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
-      subclientes = (
-        await wixData
-          .query('subclientes')
-          .eq('clienteRef', acesso.clienteRef)
-          .ascending('nome')
-          .find()
-      ).items;
-
-      // Busca os dados do cliente-pai para o banner
-      const clienteResult = await wixData.get('clientes', acesso.clienteRef);
-      clientePai = clienteResult;
+      const r = await wixData
+        .query('subclientes')
+        .eq('clienteRef', acesso.clienteRef)
+        .ascending('nome')
+        .find();
+      siglas = r.items.map(s => s.sigla);
 
     } else if (acesso.nivel === 'cliente_unidade') {
       const refs = await wixData.queryReferenced(
@@ -54,84 +54,89 @@ $w.onReady(async () => {
         acesso._id,
         'subclientes'
       );
-      subclientes = refs.items;
+      let items = refs.items;
 
-      // Para unidade, busca o cliente-pai via o primeiro subclient
-      if (subclientes.length && subclientes[0].clienteRef) {
-        const clienteResult = await wixData.get(
-          'clientes',
-          subclientes[0].clienteRef
+      // Fallback via campo inverso se queryReferenced retornar vazio
+      if (!items.length) {
+        const r = await wixData
+          .query('subclientes')
+          .hasSome('acessoUsuario_subclientes', [acesso._id])
+          .ascending('nome')
+          .find();
+        items = r.items;
+      }
+      siglas = items.map(s => s.sigla);
+    }
+
+    // ── Filtra o dataset conectado ao repeater ────────────────────────────
+    // Para admin (siglas === null), não aplica filtro — mostra tudo.
+    // Para os demais, restringe às siglas permitidas.
+    if (siglas !== null) {
+      if (siglas.length > 0) {
+        await $w('#dataset1').setFilter(
+          wixData.filter().hasSome('sigla', siglas)
         );
-        clientePai = clienteResult;
+      } else {
+        // Sem acesso a nenhum subclient — filtra para resultado vazio
+        await $w('#dataset1').setFilter(
+          wixData.filter().eq('sigla', '__nenhum__')
+        );
       }
     }
+
+    // ── Métricas ──────────────────────────────────────────────────────────
+    // Busca os itens filtrados para calcular as métricas
+    const subclientesFiltrados = siglas === null
+      ? (await wixData.query('subclientes').find()).items
+      : siglas.length > 0
+        ? (await wixData.query('subclientes').hasSome('sigla', siglas).find()).items
+        : [];
+
+    try { $w('#contUnidades').text = String(subclientesFiltrados.length); } catch (_) {}
+
+    contarDocumentos(acesso, subclientesFiltrados).then(totalDocs => {
+      try { $w('#contDocs').text = String(totalDocs); } catch (_) {}
+    });
+
+    const totalDash = subclientesFiltrados.filter(s => s.dashUrl).length;
+    try { $w('#contDashs').text = String(totalDash); } catch (_) {}
+
+    const todasTags = [...new Set(subclientesFiltrados.flatMap(s => s.tags || []))];
+    try { $w('#contTags').text = todasTags.length ? todasTags.join(', ') : '—'; } catch (_) {}
 
     // ── Banner da rede ────────────────────────────────────────────────────
     if (clientePai) {
       $w('#networkName').text = clientePai.nome || '';
       $w('#networkDesc').text = [
-        `${subclientes.length} unidade${subclientes.length !== 1 ? 's' : ''}`,
+        `${subclientesFiltrados.length} unidade${subclientesFiltrados.length !== 1 ? 's' : ''}`,
         clientePai.cidade && clientePai.estado
           ? `${clientePai.cidade}, ${clientePai.estado}`
           : null,
-        clientePai.status === 'ativo' ? 'ativo' : null,
       ]
         .filter(Boolean)
         .join(' · ');
 
-      // Logo vs sigla no box #featuredBoxSiglaLogo
       if (clientePai.logo) {
-        $w('#featuredLogo').src = clientePai.logo;
-        $w('#featuredLogo').show();
+        $w('#networkLogo').src = clientePai.logo;
+        $w('#networkLogo').show();
         $w('#networkSigla').hide();
       } else {
         $w('#networkSigla').text = clientePai.sigla || '';
         $w('#networkSigla').show();
-        $w('#featuredLogo').hide();
+        $w('#networkLogo').hide();
       }
 
-      // Clique no banner leva à ficha do subclient pai (sigla em lowercase)
       const slugRede = (clientePai.sigla || '').toLowerCase();
       $w('#networkBar').onClick(() => {
         if (slugRede) wixLocation.to(`/portal/subcliente/${slugRede}`);
       });
 
-      $w('#networkBar').show();
+      try { $w('#networkBar').show(); } catch (_) {}
     }
 
-    // ── Métricas ──────────────────────────────────────────────────────────
-    $w('#contUnidades').text = String(subclientes.length);
-
-    // Contagem de docs acessíveis (assíncrona, não bloqueia o restante)
-    contarDocumentos(acesso, subclientes).then(totalDocs => {
-      $w('#contDocs').text = String(totalDocs);
-    });
-
-    // Dashboards disponíveis
-    const totalDash = subclientes.filter(s => s.dashUrl).length;
-    $w('#contDashs').text = String(totalDash);
-
-    // Tags únicas de todos os subclientes
-    const todasTags = [...new Set(subclientes.flatMap(s => s.tags || []))];
-    $w('#contTags').text = todasTags.length ? todasTags.join(', ') : '—';
-
-    // ── Repeater de unidades ──────────────────────────────────────────────
-    $w('#repeaterUnidades').data = subclientes;
-
+    // ── Handlers do repeater (onClick do botão ver ficha) ─────────────────
+    // O dataset popula os campos — só precisamos do onClick
     $w('#repeaterUnidades').onItemReady(($item, itemData) => {
-      $item('#textSigla').text = itemData.sigla || '';
-      $item('#textNome').text  = itemData.nome  || '';
-      $item('#textCidade').text =
-        [itemData.cidade, itemData.estado].filter(Boolean).join(', ') || '—';
-
-      const isAtivo = itemData.status === 'ativo';
-      $item('#dotStatus').style.backgroundColor = isAtivo
-        ? '#04bfae'
-        : '#f25252';
-
-      const tags = itemData.tags || [];
-      $item('#textTags').text = tags.join(' · ') || '';
-
       $item('#btnVerFicha').onClick(() => {
         const slug = (itemData.sigla || '').toLowerCase();
         wixLocation.to(`/portal/subcliente/${slug}`);
@@ -143,9 +148,6 @@ $w.onReady(async () => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Conta documentos acessíveis de forma assíncrona (não bloqueia o render)
-// ─────────────────────────────────────────────────────────────────────────────
 async function contarDocumentos(acesso, subclientes) {
   try {
     if (acesso.nivel === 'coevo_admin') {

@@ -4,8 +4,8 @@
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
+import wixWindow from 'wix-window';
 
-// Helper: oculta/colapsa ou exibe/expande com segurança
 function aplicarVisibilidade(el, mostrar) {
   try {
     if (mostrar) {
@@ -18,6 +18,14 @@ function aplicarVisibilidade(el, mostrar) {
   } catch (e) {
     console.warn('Erro ao aplicar visibilidade:', e.message);
   }
+}
+
+function paraEmbedUrl(url) {
+  if (!url) return '';
+  if (url.includes('/embed/reporting/')) return url;
+  let result = url.replace(/\/u\/\d+\/reporting\//, '/reporting/');
+  result = result.replace('/reporting/', '/embed/reporting/');
+  return result;
 }
 
 $w.onReady(async () => {
@@ -39,11 +47,19 @@ $w.onReady(async () => {
     let subclientes = [];
     let clientePai  = null;
 
-    // ── Busca subclientes e cliente-pai ───────────────────────────────────
+    // ── Busca cliente-pai para qualquer nível que tenha clienteRef ─────────
+    if (acesso.clienteRef) {
+      try {
+        clientePai = await wixData.get('clientes', acesso.clienteRef);
+      } catch (_) {}
+    }
+
+    // ── Busca subclientes ──────────────────────────────────────────────────
     if (acesso.nivel === 'coevo_admin') {
       subclientes = (
         await wixData.query('subclientes').ascending('nome').find()
       ).items;
+      // Admin não tem rede específica — oculta card destaque
       aplicarVisibilidade($w('#featuredCard'), false);
 
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
@@ -54,7 +70,6 @@ $w.onReady(async () => {
           .ascending('nome')
           .find()
       ).items;
-      clientePai = await wixData.get('clientes', acesso.clienteRef);
 
     } else if (acesso.nivel === 'cliente_unidade') {
       const refs = await wixData.queryReferenced(
@@ -63,11 +78,18 @@ $w.onReady(async () => {
         'subclientes'
       );
       subclientes = refs.items;
-      aplicarVisibilidade($w('#featuredCard'), false);
+      if (!subclientes.length) {
+        const r = await wixData
+          .query('subclientes')
+          .hasSome('acessoUsuario_subclientes', [acesso._id])
+          .ascending('nome')
+          .find();
+        subclientes = r.items;
+      }
     }
 
-    // ── Card destaque (apenas para cliente_rede) ──────────────────────────
-    if (clientePai) {
+    // ── Card destaque (qualquer nível com clienteRef) ─────────────────────
+    if (clientePai && acesso.nivel !== 'coevo_admin') {
       $w('#featuredNome').text = clientePai.nome || '';
       $w('#featuredDesc').text = [
         'Dashboard consolidado',
@@ -106,11 +128,10 @@ $w.onReady(async () => {
       aplicarVisibilidade($w('#featuredCard'), true);
     }
 
-    // ── Contagem no header ────────────────────────────────────────────────
+    // ── Contagem e repeater ────────────────────────────────────────────────
     const comDash = subclientes.filter(s => s.dashUrl);
-    $w('#countDash').text = String(comDash.length);
+    try { $w('#countDash').text = String(comDash.length); } catch (_) {}
 
-    // ── Repeater de unidades com dashboard ───────────────────────────────
     $w('#repeaterDashboards').data = comDash;
 
     $w('#repeaterDashboards').onItemReady(($item, sc) => {
@@ -119,15 +140,30 @@ $w.onReady(async () => {
       $item('#textCidadeDash').text =
         [sc.cidade, sc.estado].filter(Boolean).join(', ') || '';
 
-      $item('#btnAbrirDash').link   = sc.dashUrl;
-      $item('#btnAbrirDash').target = '_blank';
+      // ── Botões de dashboard: abrem a janela dashboardWindow ────────────
+      if (sc.dashUrl) {
+        try {
+          $item('#btnDash1').onClick(() => {
+            wixWindow.openLightbox('dashboardWindow', {
+              embedUrl:  paraEmbedUrl(sc.dashUrl),
+              normalUrl: sc.dashUrl,
+            });
+          });
+        } catch (_) {}
+      }
 
       if (sc.dash2Url) {
-        $item('#btnAbrirDash2').link   = sc.dash2Url;
-        $item('#btnAbrirDash2').target = '_blank';
-        aplicarVisibilidade($item('#btnAbrirDash2'), true);
+        try {
+          $item('#btnDash2').onClick(() => {
+            wixWindow.openLightbox('dashboardWindow', {
+              embedUrl:  paraEmbedUrl(sc.dash2Url),
+              normalUrl: sc.dash2Url,
+            });
+          });
+          aplicarVisibilidade($item('#btnDash2'), true);
+        } catch (_) {}
       } else {
-        aplicarVisibilidade($item('#btnAbrirDash2'), false);
+        try { aplicarVisibilidade($item('#btnDash2'), false); } catch (_) {}
       }
     });
 
