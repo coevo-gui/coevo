@@ -1,6 +1,5 @@
 // Página: Ficha do Subcliente — /cliente/{sigla}
 // Tipo: Página Dinâmica conectada à coleção "subclientes"
-// Dados populados por conexões nativas de CMS.
 
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
@@ -34,14 +33,27 @@ function aplicar(seletor, valor) {
   }
 }
 
+// Converte URL do Looker Studio para formato embed.
+// Cobre dois formatos:
+//   .../u/0/reporting/ID  →  .../embed/reporting/ID
+//   .../reporting/ID      →  .../embed/reporting/ID
+function paraEmbedUrl(url) {
+  if (!url) return '';
+  if (url.includes('/embed/reporting/')) return url; // já é embed
+  // Remove /u/N/ se existir
+  let result = url.replace(/\/u\/\d+\/reporting\//, '/reporting/');
+  // Adiciona /embed/ antes de /reporting/
+  result = result.replace('/reporting/', '/embed/reporting/');
+  return result;
+}
+
 $w.onReady(() => {
 
   const path = wixLocation.path;
   const slugAtual = path && path.length ? path[path.length - 1] : '';
   if (!slugAtual) return;
 
-  // ── Força o dataset a carregar o item correto pela sigla da URL ──────────
-  // Necessário porque o dataset dinâmico às vezes não filtra automaticamente.
+  // Força o dataset a carregar o item correto pela sigla da URL
   $w('#dynamicDataset').setFilter(
     wixData.filter().eq('sigla', slugAtual.toUpperCase())
   );
@@ -77,10 +89,23 @@ $w.onReady(() => {
       breadcrumbItems.push({ label: item.nome || item.sigla || '' });
       try { $w('#breadcrumbs').items = breadcrumbItems; } catch (_) {}
 
-      // ── 2. OCULTAR / COLAPSAR ─────────────────────────────────────────────
-      // Nota: #boxCluster, #boxStatus, #boxTags, #boxEmailsCC são elementos
-      // do tipo Grid Cell que não suportam hide/show — controlados pelo editor.
+      // ── 2. TEXTOS POPULADOS POR CÓDIGO ────────────────────────────────────
+      // (campos que não funcionam via CMS nativo nesses tipos de elemento)
+      try { $w('#respMidia').text = item.responsavel || '—'; } catch (_) {}
+      try { $w('#cluster').text  = item.cluster     || '—'; } catch (_) {}
+      try { $w('#status').text   = item.status       || '—'; } catch (_) {}
+      try {
+        const tags = item.tags || [];
+        $w('#tags').text = Array.isArray(tags) && tags.length
+          ? tags.join(' · ')
+          : '—';
+      } catch (_) {}
+
+      // ── 3. OCULTAR / COLAPSAR CONTAINERS ─────────────────────────────────
       aplicar('#boxRespMidia',      item.responsavel);
+      aplicar('#boxCluster',        item.cluster);
+      aplicar('#boxStatus',         item.status);
+      aplicar('#boxTags',           item.tags);
       aplicar('#boxGA4',            item.idGA4);
       aplicar('#boxGAds',           item.idGAds);
       aplicar('#boxMAds',           item.idMAds);
@@ -89,12 +114,13 @@ $w.onReady(() => {
       aplicar('#boxFinanceiro',     item.emailFinanceiro);
       aplicar('#financeiroContato', item.contatoFinanceiro);
       aplicar('#boxMkt',            item.focalMktEmail);
+      aplicar('#boxEmailsCC',       item.emailsCopia);
       aplicar('#boxDash1',          item.dashUrl);
       aplicar('#boxDash2',          item.dash2Url);
       aplicar('#boxTasks',          item.clickupUrl);
       aplicar('#boxWiki',           item.wikiUrl);
 
-      // ── 3. BOTÕES MAILTO ──────────────────────────────────────────────────
+      // ── 4. BOTÕES MAILTO ──────────────────────────────────────────────────
       if (item.emailGerenteGeral) {
         try { $w('#btnGG').link = `mailto:${item.emailGerenteGeral}`; } catch (_) {}
       }
@@ -105,18 +131,14 @@ $w.onReady(() => {
         try { $w('#btnMkt').link = `mailto:${item.focalMktEmail}`; } catch (_) {}
       }
 
-      // ── 4. BOTÃO DE EDIÇÃO ────────────────────────────────────────────────
+      // ── 5. BOTÃO DE EDIÇÃO ────────────────────────────────────────────────
       try {
         $w('#btnSubclienteEdit').onClick(() => {
           wixLocation.to(`/cliente/editar/${(item.sigla || '').toLowerCase()}`);
         });
       } catch (_) {}
 
-      // ── 5. BOTÕES DE DASHBOARD ────────────────────────────────────────────
-      function paraEmbedUrl(url) {
-        if (!url) return '';
-        return url.replace(/\/u\/\d+\/reporting\//, '/embed/reporting/');
-      }
+      // ── 6. BOTÕES DE DASHBOARD ────────────────────────────────────────────
       if (item.dashUrl) {
         try {
           $w('#btnDash1').onClick(() => {

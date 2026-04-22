@@ -17,8 +17,6 @@ $w.onReady(() => {
 
   $w('#embedDash').src = ctx.embedUrl;
 
-  console.log('[dashboardWindow] src aplicado ao #embedDash:', $w('#embedDash').src);
-
   if (ctx.normalUrl) {
     $w('#btnAbrirDash').link   = ctx.normalUrl;
     $w('#btnAbrirDash').target = '_blank';
