@@ -1,10 +1,33 @@
-// API Reference: https://www.wix.com/velo/reference/api-overview/introduction
-// “Hello, World!” Example: https://learn-code.wix.com/en/article/hello-world
+// Janela: dashboardWindow
+// Recebe { embedUrl, titulo } via openLightbox e carrega o dashboard no #embedDash.
 
-$w.onReady(function () {
-    // Write your JavaScript here
+import wixWindow from 'wix-window';
 
-    // To select an element by ID use: $w('#elementID')
+$w.onReady(() => {
 
-    // Click 'Preview' to run your code
+  const ctx = wixWindow.lightbox.getContext();
+
+  if (!ctx || !ctx.embedUrl) {
+    // Sem URL: fecha a janela
+    wixWindow.lightbox.close();
+    return;
+  }
+
+  // Aplica o título (se houver elemento de texto #dashTitulo na janela)
+  try {
+    if (ctx.titulo) {
+      $w('#dashTitulo').text = ctx.titulo;
+    }
+  } catch (_) {}
+
+  // Seta a URL no elemento HtmlComponent/Embed
+  $w('#embedDash').src = ctx.embedUrl;
+
+  // Botão de fechar a janela (se houver #btnFecharDash)
+  try {
+    $w('#btnFecharDash').onClick(() => {
+      wixWindow.lightbox.close();
+    });
+  } catch (_) {}
+
 });

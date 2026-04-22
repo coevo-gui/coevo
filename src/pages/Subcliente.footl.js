@@ -1,9 +1,12 @@
 // Página: Ficha do Subcliente — /cliente/{sigla}
 // Tipo: Página Dinâmica conectada à coleção "subclientes"
 // Dados populados por conexões nativas de CMS.
-// Este código: oculta/colapsa containers vazios, breadcrumb e botões mailto.
+// Este código: oculta/colapsa containers vazios, breadcrumb, botões mailto,
+//              navegação para edição e abertura da janela de dashboard.
 
 import wixData from 'wix-data';
+import wixLocation from 'wix-location';
+import wixWindow from 'wix-window';
 
 $w.onReady(() => {
 
@@ -39,8 +42,6 @@ $w.onReady(() => {
     $w('#breadcrumbs').items = breadcrumbItems;
 
     // ── 2. OCULTAR E COLAPSAR CONTAINERS COM CAMPOS VAZIOS ──────────────────
-    // collapse() remove o espaço ocupado; hide() só torna invisível.
-    // Usamos ambos para garantir compatibilidade com todos os tipos de elemento.
     function aplicar(seletor, valor) {
       const vazio =
         valor === null ||
@@ -73,8 +74,8 @@ $w.onReady(() => {
     aplicar('#boxGG',             item.emailGerenteGeral);
     aplicar('#boxFinanceiro',     item.emailFinanceiro);
     aplicar('#financeiroContato', item.contatoFinanceiro);
-    aplicar('#boxMkt',            item.focalMktEmail);
-    aplicar('#boxEmailsCC',       item.copiaEmails);
+    aplicar('#boxMkt',            item.emailFocalMkt);
+    aplicar('#boxEmailsCC',       item.emailsCopia);
     aplicar('#boxDash1',          item.dashUrl);
     aplicar('#boxDash2',          item.dash2Url);
     aplicar('#boxTasks',          item.clickupUrl);
@@ -89,6 +90,38 @@ $w.onReady(() => {
     }
     if (item.emailFocalMkt) {
       $w('#btnMkt').link = `mailto:${item.emailFocalMkt}`;
+    }
+
+    // ── 4. BOTÃO DE EDIÇÃO ──────────────────────────────────────────────────
+    $w('#btnSubclienteEdit').onClick(() => {
+      const sigla = (item.sigla || '').toLowerCase();
+      wixLocation.to(`/cliente/editar/${sigla}`);
+    });
+
+    // ── 5. BOTÕES DE DASHBOARD (abrem a janela dashboardWindow) ────────────
+    // Converte URL do Looker/DataStudio para formato embed:
+    // .../u/reporting/... → .../embed/reporting/...
+    function paraEmbedUrl(url) {
+      if (!url) return '';
+      return url.replace(/\/(u|0|1|2|3)\/(reporting)/, '/embed/$2');
+    }
+
+    if (item.dashUrl) {
+      $w('#btnDash1').onClick(() => {
+        wixWindow.openLightbox('dashboardWindow', {
+          embedUrl: paraEmbedUrl(item.dashUrl),
+          titulo:   item.nome || item.sigla || '',
+        });
+      });
+    }
+
+    if (item.dash2Url) {
+      $w('#btnDash2').onClick(() => {
+        wixWindow.openLightbox('dashboardWindow', {
+          embedUrl: paraEmbedUrl(item.dash2Url),
+          titulo:   item.nome || item.sigla || '',
+        });
+      });
     }
 
   });
