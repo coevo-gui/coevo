@@ -5,6 +5,21 @@ import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
 
+function vis(seletor, mostrar) {
+  try {
+    const el = $w(seletor);
+    if (mostrar) {
+      if (typeof el.expand === 'function') el.expand();
+      if (typeof el.show  === 'function') el.show();
+    } else {
+      if (typeof el.collapse === 'function') el.collapse();
+      if (typeof el.hide    === 'function') el.hide();
+    }
+  } catch (e) {
+    console.warn(`[vis] ERRO em ${seletor}:`, e.message);
+  }
+}
+
 $w.onReady(async () => {
   try {
     const member = await currentMember.getMember();
@@ -24,21 +39,20 @@ $w.onReady(async () => {
     }
 
     const acesso = acessoResult.items[0];
-    let siglas    = []; // siglas acessíveis — usadas para filtrar #dataset1
+    let siglas    = [];
     let clientePai = null;
 
-    // ── Busca cliente-pai para qualquer nível que tenha clienteRef ────────
+    // ── Busca cliente-pai ─────────────────────────────────────────────────
     if (acesso.clienteRef) {
       try {
         clientePai = await wixData.get('clientes', acesso.clienteRef);
       } catch (_) {}
     }
 
-    // ── Determina as siglas acessíveis conforme nível ─────────────────────
+    // ── Determina as siglas acessíveis ────────────────────────────────────
     if (acesso.nivel === 'coevo_admin') {
-      // Admin vê tudo — sem filtro no dataset
       siglas = null;
-      try { $w('#networkBar').hide(); } catch (_) {}
+      vis('#networkBar', false);
 
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
       const r = await wixData
@@ -55,8 +69,6 @@ $w.onReady(async () => {
         'subclientes'
       );
       let items = refs.items;
-
-      // Fallback via campo inverso se queryReferenced retornar vazio
       if (!items.length) {
         const r = await wixData
           .query('subclientes')
@@ -69,23 +81,15 @@ $w.onReady(async () => {
     }
 
     // ── Filtra o dataset conectado ao repeater ────────────────────────────
-    // Para admin (siglas === null), não aplica filtro — mostra tudo.
-    // Para os demais, restringe às siglas permitidas.
     if (siglas !== null) {
-      if (siglas.length > 0) {
-        await $w('#dataset1').setFilter(
-          wixData.filter().hasSome('sigla', siglas)
-        );
-      } else {
-        // Sem acesso a nenhum subclient — filtra para resultado vazio
-        await $w('#dataset1').setFilter(
-          wixData.filter().eq('sigla', '__nenhum__')
-        );
-      }
+      await $w('#dataset1').setFilter(
+        siglas.length > 0
+          ? wixData.filter().hasSome('sigla', siglas)
+          : wixData.filter().eq('sigla', '__nenhum__')
+      );
     }
 
     // ── Métricas ──────────────────────────────────────────────────────────
-    // Busca os itens filtrados para calcular as métricas
     const subclientesFiltrados = siglas === null
       ? (await wixData.query('subclientes').find()).items
       : siglas.length > 0
@@ -117,25 +121,26 @@ $w.onReady(async () => {
         .join(' · ');
 
       if (clientePai.logo) {
-        $w('#networkLogo').src = clientePai.logo;
-        $w('#networkLogo').show();
-        $w('#networkSigla').hide();
+        try { $w('#networkLogo').src = clientePai.logo; } catch (_) {}
+        vis('#networkLogo', true);
+        vis('#networkSigla', false);
       } else {
-        $w('#networkSigla').text = clientePai.sigla || '';
-        $w('#networkSigla').show();
-        $w('#networkLogo').hide();
+        try { $w('#networkSigla').text = clientePai.sigla || ''; } catch (_) {}
+        vis('#networkSigla', true);
+        vis('#networkLogo', false);
       }
 
       const slugRede = (clientePai.sigla || '').toLowerCase();
-      $w('#networkBar').onClick(() => {
-        if (slugRede) wixLocation.to(`/portal/subcliente/${slugRede}`);
-      });
+      try {
+        $w('#networkBar').onClick(() => {
+          if (slugRede) wixLocation.to(`/portal/subcliente/${slugRede}`);
+        });
+      } catch (_) {}
 
-      try { $w('#networkBar').show(); } catch (_) {}
+      vis('#networkBar', true);
     }
 
-    // ── Handlers do repeater (onClick do botão ver ficha) ─────────────────
-    // O dataset popula os campos — só precisamos do onClick
+    // ── Handlers do repeater ──────────────────────────────────────────────
     $w('#repeaterUnidades').onItemReady(($item, itemData) => {
       $item('#btnVerFicha').onClick(() => {
         const slug = (itemData.sigla || '').toLowerCase();

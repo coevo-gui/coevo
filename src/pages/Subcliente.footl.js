@@ -69,6 +69,17 @@ $w.onReady(() => {
       }
       if (!item) return;
 
+      // ── Filtra o dataset de documentos pelo subclient atual ───────────────
+      // Necessário porque o setFilter no #dynamicDataset quebra o filtro
+      // dinâmico configurado no editor entre #dataset1 e #dynamicDataset.
+      try {
+        await $w('#dataset1').setFilter(
+          wixData.filter().eq('subclienteRef', item._id)
+        );
+      } catch (e) {
+        console.warn('Não foi possível filtrar #dataset1:', e.message);
+      }
+
       // ── 1. BREADCRUMB ─────────────────────────────────────────────────────
       const breadcrumbItems = [];
       breadcrumbItems.push({
