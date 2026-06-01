@@ -1,22 +1,70 @@
 // Web Method — Smart Briefing
 // Chamado pelo Velo da página via import, sem CORS.
-// Acessa ANTHROPIC_KEY do Secrets Manager.
 
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
+// IDs das páginas da wiki por sigla de cliente
+const WIKI_PAGES = {
+  CJOI: '2zpg6-8793',
+  AHI:  '2zpg6-1023',
+  WGA:  '2zpg6-9153',
+  BRI:  '2zpg6-7793',
+  SAG:  '2zpg6-7833',
+  DYC:  '2zpg6-5493',
+  HCV:  '2zpg6-8153',
+  JCB:  '2zpg6-9173',
+};
+
+const WIKI_DOC_ID = '2zpg6-1403';
+const CU_BASE = 'https://api.clickup.com/api/v2';
+
 /**
- * Chama a API da Anthropic e retorna a resposta da IA.
- * @param {object} payload — { system, messages, model?, max_tokens? }
- * @returns {Promise<{text: string}|{error: string}>}
+ * Busca o conteúdo da página wiki do cliente no ClickUp.
+ * Retorna string com o conteúdo ou string vazia se não encontrar.
+ */
+async function getClientWikiContent(sigla) {
+  const pageId = WIKI_PAGES[sigla?.toUpperCase()];
+  if (!pageId) return '';
+  try {
+    const token = await getSecret('CLICKUP_TOKEN');
+    const res = await fetch(
+      `${CU_BASE}/doc/${WIKI_DOC_ID}/page/${pageId}?content_format=text/md`,
+      { headers: { Authorization: token } }
+    );
+    if (!res.ok) return '';
+    const data = await res.json();
+    // Limita a 3000 chars para não sobrecarregar o contexto
+    return (data.content || '').slice(0, 3000);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Chama a API da Anthropic.
+ * Se firstAnalysis=true, busca wiki do cliente e injeta no system prompt.
+ * @param {object} payload — { system, messages, model?, max_tokens?, clientSigla?, firstAnalysis? }
  */
 export async function callAI(payload) {
   try {
     const apiKey = await getSecret('ANTHROPIC_KEY');
+
+    let systemPrompt = payload.system;
+
+    // Na primeira análise, enriquece com contexto da wiki do cliente
+    if (payload.firstAnalysis && payload.clientSigla) {
+      const wikiContent = await getClientWikiContent(payload.clientSigla);
+      if (wikiContent) {
+        systemPrompt +=
+          `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+      }
+    }
+
     const body = {
       model: payload.model || 'claude-haiku-4-5-20251001',
-      max_tokens: payload.max_tokens || 800,
-      system: payload.system,
+      max_tokens: payload.max_tokens || 1000,
+      system: systemPrompt,
       messages: payload.messages,
     };
 
@@ -31,11 +79,9 @@ export async function callAI(payload) {
     });
 
     const data = await response.json();
-
     if (!response.ok) {
       return { error: data.error?.message || `HTTP ${response.status}` };
     }
-
     return { text: data.content?.[0]?.text || '' };
   } catch (err) {
     return { error: err.message };
@@ -43,23 +89,50 @@ export async function callAI(payload) {
 }
 
 /**
- * Retorna lista de subclientes { sigla, nome }.
- * @returns {Promise<{items: Array}|{error: string}>}
+ * Retorna lista de subclientes filtrada pelo nível de acesso do membro.
+ * Requer memberId para consultar acessoUsuario.
  */
-export async function getSubclientes() {
+export async function getSubclientes(memberId) {
   try {
-    const result = await wixData
-      .query('subclientes')
-      .ascending('nome')
-      .limit(200)
+    if (!memberId) return { error: 'memberId obrigatório' };
+
+    const acessoResult = await wixData
+      .query('acessoUsuario')
+      .eq('memberId', memberId)
       .find({ suppressAuth: true });
 
-    const items = result.items.map((i) => ({
-      sigla: i.sigla || '',
-      nome: i.nome || i.sigla || '',
-    }));
+    if (!acessoResult.items.length) return { items: [] };
 
-    return { items };
+    const acesso = acessoResult.items[0];
+    let items = [];
+
+    if (acesso.nivel === 'coevo_admin') {
+      const r = await wixData
+        .query('subclientes')
+        .ascending('nome')
+        .limit(200)
+        .find({ suppressAuth: true });
+      items = r.items;
+    } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
+      const r = await wixData
+        .query('subclientes')
+        .eq('clienteRef', acesso.clienteRef)
+        .ascending('nome')
+        .find({ suppressAuth: true });
+      items = r.items;
+    } else if (acesso.nivel === 'cliente_unidade') {
+      const refs = await wixData.queryReferenced(
+        'acessoUsuario',
+        acesso._id,
+        'subclientes',
+        { suppressAuth: true }
+      );
+      items = refs.items;
+    }
+
+    return {
+      items: items.map((i) => ({ sigla: i.sigla || '', nome: i.nome || i.sigla || '' })),
+    };
   } catch (err) {
     return { error: err.message };
   }
