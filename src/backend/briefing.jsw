@@ -1,0 +1,66 @@
+// Web Method — Smart Briefing
+// Chamado pelo Velo da página via import, sem CORS.
+// Acessa ANTHROPIC_KEY do Secrets Manager.
+
+import { getSecret } from 'wix-secrets-backend';
+import wixData from 'wix-data';
+
+/**
+ * Chama a API da Anthropic e retorna a resposta da IA.
+ * @param {object} payload — { system, messages, model?, max_tokens? }
+ * @returns {Promise<{text: string}|{error: string}>}
+ */
+export async function callAI(payload) {
+  try {
+    const apiKey = await getSecret('ANTHROPIC_KEY');
+    const body = {
+      model: payload.model || 'claude-haiku-4-5-20251001',
+      max_tokens: payload.max_tokens || 800,
+      system: payload.system,
+      messages: payload.messages,
+    };
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return { error: data.error?.message || `HTTP ${response.status}` };
+    }
+
+    return { text: data.content?.[0]?.text || '' };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+/**
+ * Retorna lista de subclientes { sigla, nome }.
+ * @returns {Promise<{items: Array}|{error: string}>}
+ */
+export async function getSubclientes() {
+  try {
+    const result = await wixData
+      .query('subclientes')
+      .ascending('nome')
+      .limit(200)
+      .find({ suppressAuth: true });
+
+    const items = result.items.map((i) => ({
+      sigla: i.sigla || '',
+      nome: i.nome || i.sigla || '',
+    }));
+
+    return { items };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
