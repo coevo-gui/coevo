@@ -1,6 +1,7 @@
 // Página: Smart Briefing
-// Bridge entre o embed HTML (Artifact) e os Web Methods do backend.
-// O embed se comunica via postMessage; este código escuta, executa e responde.
+// Bridge entre o embed HTML (#embedSmartBriefing) e os Web Methods do backend.
+// Usa a API nativa do Wix HtmlComponent (.onMessage / .postMessage) —
+// funciona dentro do Web Worker do Velo, sem depender de window.
 
 import { currentMember } from 'wix-members';
 import wixLocation from 'wix-location';
@@ -14,15 +15,12 @@ $w.onReady(async () => {
     return;
   }
 
-  // Escuta mensagens do embed
-  window.addEventListener('message', async (event) => {
-    // Aceita apenas mensagens com nossa assinatura
-    if (!event.data || event.data.source !== 'sb-embed') return;
-
+  // Escuta mensagens vindas do embed via API nativa do HtmlComponent
+  $w('#embedSmartBriefing').onMessage(async (event) => {
     const { id, type, payload } = event.data;
 
     const reply = (data) =>
-      event.source.postMessage({ source: 'sb-velo', id, ...data }, '*');
+      $w('#embedSmartBriefing').postMessage({ id, ...data });
 
     if (type === 'GET_SUBCLIENTES') {
       const result = await getSubclientes();
