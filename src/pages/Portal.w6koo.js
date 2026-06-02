@@ -20,7 +20,6 @@ function vis(seletor, mostrar) {
   }
 }
 
-// Valida se uma URL de imagem é utilizável no elemento Wix Image
 function urlLogoValida(url) {
   return typeof url === 'string' &&
     (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('wix:'));
@@ -48,14 +47,12 @@ $w.onReady(async () => {
     let siglas    = [];
     let clientePai = null;
 
-    // ── Busca cliente-pai ─────────────────────────────────────────────────
     if (acesso.clienteRef) {
       try {
         clientePai = await wixData.get('clientes', acesso.clienteRef);
       } catch (_) {}
     }
 
-    // ── Determina as siglas acessíveis ────────────────────────────────────
     if (acesso.nivel === 'coevo_admin') {
       siglas = null;
       vis('#networkBar', false);
@@ -86,7 +83,7 @@ $w.onReady(async () => {
       siglas = items.map(s => s.sigla);
     }
 
-    // ── Filtra o dataset conectado ao repeater ────────────────────────────
+    // ── Filtra o dataset ─────────────────────────────────────────────────────
     if (siglas !== null) {
       await $w('#dataset1').setFilter(
         siglas.length > 0
@@ -95,7 +92,7 @@ $w.onReady(async () => {
       );
     }
 
-    // ── Métricas ──────────────────────────────────────────────────────────
+    // ── Métricas (calculadas uma vez no carregamento) ───────────────────────────
     const subclientesFiltrados = siglas === null
       ? (await wixData.query('subclientes').find()).items
       : siglas.length > 0
@@ -113,8 +110,11 @@ $w.onReady(async () => {
       try { $w('#contTags').text     = todasTags.length ? todasTags.join(', ') : '—'; } catch (_) {}
     }
 
-    // Calcula docs e aplica métricas pela primeira vez
-    contarDocumentos(acesso, subclientesFiltrados).then(atualizarMetricas);
+    let totalDocsCache = 0;
+    contarDocumentos(acesso, subclientesFiltrados).then(n => {
+      totalDocsCache = n;
+      atualizarMetricas(n);
+    });
 
     // ── Banner da rede ────────────────────────────────────────────────────
     if (clientePai) {
@@ -128,7 +128,6 @@ $w.onReady(async () => {
         .filter(Boolean)
         .join(' · ');
 
-      // Só aplica .src se a URL for válida (evita erro 'cannot be set to src')
       if (urlLogoValida(clientePai.logo)) {
         try { $w('#networkLogo').src = clientePai.logo; } catch (_) {}
         vis('#networkLogo', true);
@@ -149,10 +148,11 @@ $w.onReady(async () => {
       vis('#networkBar', true);
     }
 
-    // ── Busca — filtra o dataset combinando acesso + texto digitado ────────
+    // ── Busca — filtra o dataset e reescreve as métricas após o dataset ─────
+    // setFilter() retorna Promise — así as métricas são regravadas DEPOIS que
+    // o dataset termina de atualizar todos os elementos conectados nativamente,
+    // evitando que a contagem dinâmica do dataset sobrescreva os valores fixos.
     const siglasAcesso = siglas;
-    let totalDocsCache = 0;
-    contarDocumentos(acesso, subclientesFiltrados).then(n => { totalDocsCache = n; });
 
     function aplicarFiltro(termoBusca) {
       let filtro = wixData.filter();
@@ -168,11 +168,10 @@ $w.onReady(async () => {
         filtro = filtro.contains('nome', termo);
       }
 
-      $w('#dataset1').setFilter(filtro);
-
-      // Regrava as métricas após o setFilter para evitar que conexões
-      // nativas do dataset sobrescrevam os textos com a contagem atual
-      atualizarMetricas(totalDocsCache);
+      // .then() garante que atualizarMetricas rode DEPOIS do dataset
+      $w('#dataset1').setFilter(filtro).then(() => {
+        atualizarMetricas(totalDocsCache);
+      });
     }
 
     $w('#searchCliente').onInput(event => {
@@ -181,6 +180,15 @@ $w.onReady(async () => {
 
     // ── Handlers do repeater ──────────────────────────────────────────────
     $w('#repeaterUnidades').onItemReady(($item, itemData) => {
+      // Oculta a logo do cliente quando o campo está vazio ou inválido
+      // (evita o erro 'src cannot be set to src' da conexão nativa do CMS)
+      try {
+        const logo = itemData.logoSubcliente;
+        if (!urlLogoValida(logo)) {
+          $item('#logoCliente').hide();
+        }
+      } catch (_) {}
+
       $item('#btnVerFicha').onClick(() => {
         const slug = (itemData.sigla || '').toLowerCase();
         wixLocation.to(`/portal/subcliente/${slug}`);
