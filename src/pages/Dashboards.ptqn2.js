@@ -47,19 +47,16 @@ $w.onReady(async () => {
     let subclientes = [];
     let clientePai  = null;
 
-    // ── Busca cliente-pai para qualquer nível que tenha clienteRef ─────────
     if (acesso.clienteRef) {
       try {
         clientePai = await wixData.get('clientes', acesso.clienteRef);
       } catch (_) {}
     }
 
-    // ── Busca subclientes ──────────────────────────────────────────────────
     if (acesso.nivel === 'coevo_admin') {
       subclientes = (
         await wixData.query('subclientes').ascending('nome').find()
       ).items;
-      // Admin não tem rede específica — oculta card destaque
       aplicarVisibilidade($w('#featuredCard'), false);
 
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
@@ -88,7 +85,6 @@ $w.onReady(async () => {
       }
     }
 
-    // ── Card destaque (qualquer nível com clienteRef) ─────────────────────
     if (clientePai && acesso.nivel !== 'coevo_admin') {
       $w('#featuredNome').text = clientePai.nome || '';
       $w('#featuredDesc').text = [
@@ -128,7 +124,6 @@ $w.onReady(async () => {
       aplicarVisibilidade($w('#featuredCard'), true);
     }
 
-    // ── Contagem e repeater ────────────────────────────────────────────────
     const comDash = subclientes.filter(s => s.dashUrl);
     try { $w('#countDash').text = String(comDash.length); } catch (_) {}
 
@@ -140,7 +135,6 @@ $w.onReady(async () => {
       $item('#textCidadeDash').text =
         [sc.cidade, sc.estado].filter(Boolean).join(', ') || '';
 
-      // ── Botões de dashboard: abrem a janela dashboardWindow ────────────
       if (sc.dashUrl) {
         try {
           $item('#btnDash1').onClick(() => {

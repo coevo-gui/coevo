@@ -140,6 +140,30 @@ $w.onReady(async () => {
       vis('#networkBar', true);
     }
 
+    // ── Busca — filtra o dataset combinando acesso + texto digitado ────────
+    const siglasAcesso = siglas;
+
+    function aplicarFiltro(termoBusca) {
+      let filtro = wixData.filter();
+
+      if (siglasAcesso !== null) {
+        filtro = siglasAcesso.length > 0
+          ? filtro.hasSome('sigla', siglasAcesso)
+          : filtro.eq('sigla', '__nenhum__');
+      }
+
+      const termo = (termoBusca || '').trim();
+      if (termo.length > 0) {
+        filtro = filtro.contains('nome', termo);
+      }
+
+      $w('#dataset1').setFilter(filtro);
+    }
+
+    $w('#searchCliente').onInput(event => {
+      aplicarFiltro(event.target.value);
+    });
+
     // ── Handlers do repeater ──────────────────────────────────────────────
     $w('#repeaterUnidades').onItemReady(($item, itemData) => {
       $item('#btnVerFicha').onClick(() => {
