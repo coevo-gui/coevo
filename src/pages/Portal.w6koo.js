@@ -20,6 +20,12 @@ function vis(seletor, mostrar) {
   }
 }
 
+// Valida se uma URL de imagem é utilizável no elemento Wix Image
+function urlLogoValida(url) {
+  return typeof url === 'string' &&
+    (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('wix:'));
+}
+
 $w.onReady(async () => {
   try {
     const member = await currentMember.getMember();
@@ -96,23 +102,25 @@ $w.onReady(async () => {
         ? (await wixData.query('subclientes').hasSome('sigla', siglas).find()).items
         : [];
 
-    try { $w('#contUnidades').text = String(subclientesFiltrados.length); } catch (_) {}
+    const totalUnidades = subclientesFiltrados.length;
+    const totalDash     = subclientesFiltrados.filter(s => s.dashUrl).length;
+    const todasTags     = [...new Set(subclientesFiltrados.flatMap(s => s.tags || []))];
 
-    contarDocumentos(acesso, subclientesFiltrados).then(totalDocs => {
-      try { $w('#contDocs').text = String(totalDocs); } catch (_) {}
-    });
+    function atualizarMetricas(totalDocs) {
+      try { $w('#contUnidades').text = String(totalUnidades); } catch (_) {}
+      try { $w('#contDocs').text     = String(totalDocs);     } catch (_) {}
+      try { $w('#contDashs').text    = String(totalDash);     } catch (_) {}
+      try { $w('#contTags').text     = todasTags.length ? todasTags.join(', ') : '—'; } catch (_) {}
+    }
 
-    const totalDash = subclientesFiltrados.filter(s => s.dashUrl).length;
-    try { $w('#contDashs').text = String(totalDash); } catch (_) {}
-
-    const todasTags = [...new Set(subclientesFiltrados.flatMap(s => s.tags || []))];
-    try { $w('#contTags').text = todasTags.length ? todasTags.join(', ') : '—'; } catch (_) {}
+    // Calcula docs e aplica métricas pela primeira vez
+    contarDocumentos(acesso, subclientesFiltrados).then(atualizarMetricas);
 
     // ── Banner da rede ────────────────────────────────────────────────────
     if (clientePai) {
       $w('#networkName').text = clientePai.nome || '';
       $w('#networkDesc').text = [
-        `${subclientesFiltrados.length} unidade${subclientesFiltrados.length !== 1 ? 's' : ''}`,
+        `${totalUnidades} unidade${totalUnidades !== 1 ? 's' : ''}`,
         clientePai.cidade && clientePai.estado
           ? `${clientePai.cidade}, ${clientePai.estado}`
           : null,
@@ -120,7 +128,8 @@ $w.onReady(async () => {
         .filter(Boolean)
         .join(' · ');
 
-      if (clientePai.logo) {
+      // Só aplica .src se a URL for válida (evita erro 'cannot be set to src')
+      if (urlLogoValida(clientePai.logo)) {
         try { $w('#networkLogo').src = clientePai.logo; } catch (_) {}
         vis('#networkLogo', true);
         vis('#networkSigla', false);
@@ -142,6 +151,8 @@ $w.onReady(async () => {
 
     // ── Busca — filtra o dataset combinando acesso + texto digitado ────────
     const siglasAcesso = siglas;
+    let totalDocsCache = 0;
+    contarDocumentos(acesso, subclientesFiltrados).then(n => { totalDocsCache = n; });
 
     function aplicarFiltro(termoBusca) {
       let filtro = wixData.filter();
@@ -158,6 +169,10 @@ $w.onReady(async () => {
       }
 
       $w('#dataset1').setFilter(filtro);
+
+      // Regrava as métricas após o setFilter para evitar que conexões
+      // nativas do dataset sobrescrevam os textos com a contagem atual
+      atualizarMetricas(totalDocsCache);
     }
 
     $w('#searchCliente').onInput(event => {
