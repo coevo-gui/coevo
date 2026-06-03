@@ -1,28 +1,21 @@
 // Web Method — Smart Briefing
-// Chamado pelo Velo da página via import, sem CORS.
-
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
-// IDs das páginas da wiki por sigla de cliente
 const WIKI_PAGES = {
-  CJOI: '2zpg6-8793',
-  AHI:  '2zpg6-1023',
-  WGA:  '2zpg6-9153',
-  BRI:  '2zpg6-7793',
-  SAG:  '2zpg6-7833',
-  DYC:  '2zpg6-5493',
-  HCV:  '2zpg6-8153',
-  JCB:  '2zpg6-9173',
+  CJOI: '2zpg6-8793', AHI: '2zpg6-1023', WGA: '2zpg6-9153',
+  BRI:  '2zpg6-7793', SAG: '2zpg6-7833', DYC: '2zpg6-5493',
+  HCV:  '2zpg6-8153', JCB: '2zpg6-9173',
 };
-
 const WIKI_DOC_ID = '2zpg6-1403';
 const CU_BASE = 'https://api.clickup.com/api/v2';
+const BREVO_BASE = 'https://api.brevo.com/v3';
+const SENDER = { name: 'coevo.co', email: 'midia@coevo.co' };
+const EQUIPE = [
+  { name: 'Mari', email: 'mari@coevo.co' },
+  { name: 'Bruno', email: 'bruno@coevo.co' },
+];
 
-/**
- * Busca o conteúdo da página wiki do cliente no ClickUp.
- * Retorna string com o conteúdo ou string vazia se não encontrar.
- */
 async function getClientWikiContent(sigla) {
   const pageId = WIKI_PAGES[sigla?.toUpperCase()];
   if (!pageId) return '';
@@ -34,40 +27,25 @@ async function getClientWikiContent(sigla) {
     );
     if (!res.ok) return '';
     const data = await res.json();
-    // Limita a 3000 chars para não sobrecarregar o contexto
     return (data.content || '').slice(0, 3000);
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 
-/**
- * Chama a API da Anthropic.
- * Se firstAnalysis=true, busca wiki do cliente e injeta no system prompt.
- * @param {object} payload — { system, messages, model?, max_tokens?, clientSigla?, firstAnalysis? }
- */
 export async function callAI(payload) {
   try {
     const apiKey = await getSecret('ANTHROPIC_KEY');
-
     let systemPrompt = payload.system;
-
-    // Na primeira análise, enriquece com contexto da wiki do cliente
     if (payload.firstAnalysis && payload.clientSigla) {
       const wikiContent = await getClientWikiContent(payload.clientSigla);
-      if (wikiContent) {
-        systemPrompt +=
-          `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
-      }
+      if (wikiContent)
+        systemPrompt += `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
     }
-
     const body = {
       model: payload.model || 'claude-haiku-4-5-20251001',
       max_tokens: payload.max_tokens || 1000,
       system: systemPrompt,
       messages: payload.messages,
     };
-
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -77,62 +55,185 @@ export async function callAI(payload) {
       },
       body: JSON.stringify(body),
     });
-
     const data = await response.json();
-    if (!response.ok) {
-      return { error: data.error?.message || `HTTP ${response.status}` };
-    }
+    if (!response.ok) return { error: data.error?.message || `HTTP ${response.status}` };
     return { text: data.content?.[0]?.text || '' };
-  } catch (err) {
-    return { error: err.message };
-  }
+  } catch (err) { return { error: err.message }; }
 }
 
-/**
- * Retorna lista de subclientes filtrada pelo nível de acesso do membro.
- * Requer memberId para consultar acessoUsuario.
- */
 export async function getSubclientes(memberId) {
   try {
     if (!memberId) return { error: 'memberId obrigatório' };
-
     const acessoResult = await wixData
-      .query('acessoUsuario')
-      .eq('memberId', memberId)
-      .find({ suppressAuth: true });
-
+      .query('acessoUsuario').eq('memberId', memberId).find({ suppressAuth: true });
     if (!acessoResult.items.length) return { items: [] };
-
     const acesso = acessoResult.items[0];
     let items = [];
-
     if (acesso.nivel === 'coevo_admin') {
-      const r = await wixData
-        .query('subclientes')
-        .ascending('nome')
-        .limit(200)
-        .find({ suppressAuth: true });
+      const r = await wixData.query('subclientes').ascending('nome').limit(200).find({ suppressAuth: true });
       items = r.items;
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
-      const r = await wixData
-        .query('subclientes')
-        .eq('clienteRef', acesso.clienteRef)
-        .ascending('nome')
-        .find({ suppressAuth: true });
+      const r = await wixData.query('subclientes').eq('clienteRef', acesso.clienteRef).ascending('nome').find({ suppressAuth: true });
       items = r.items;
     } else if (acesso.nivel === 'cliente_unidade') {
-      const refs = await wixData.queryReferenced(
-        'acessoUsuario',
-        acesso._id,
-        'subclientes',
-        { suppressAuth: true }
-      );
+      const refs = await wixData.queryReferenced('acessoUsuario', acesso._id, 'subclientes', { suppressAuth: true });
       items = refs.items;
     }
+    return { items: items.map(i => ({ sigla: i.sigla || '', nome: i.nome || i.sigla || '' })) };
+  } catch (err) { return { error: err.message }; }
+}
 
-    return {
-      items: items.map((i) => ({ sigla: i.sigla || '', nome: i.nome || i.sigla || '' })),
+/**
+ * Envia os dois emails transacionais via Brevo após criação da task.
+ * @param {object} p — { taskName, taskUrl, clienteNome, clienteSigla,
+ *                       categoria, prazo, campos, firstAiReply,
+ *                       solicitanteNome, solicitanteEmail }
+ */
+export async function sendBriefingEmails(p) {
+  try {
+    const brevoKey = await getSecret('BREVO_API_KEY');
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'api-key': brevoKey,
     };
+
+    const prazoFmt = p.prazo
+      ? new Date(p.prazo + 'T12:00:00').toLocaleDateString('pt-BR')
+      : '—';
+
+    // Monta linhas de campos do formulário para o email do cliente
+    const camposHtml = (p.campos || [])
+      .filter(c => c.value)
+      .map(c => `<tr>
+        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;white-space:nowrap;vertical-align:top">${c.label}</td>
+        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${c.value}</td>
+      </tr>`)
+      .join('');
+
+    // ── EMAIL INTERNO (equipe) ────────────────────────────────────────────
+    const htmlInterno = `
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden">
+  <tr><td style="background:#002bff;padding:24px 32px">
+    <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.7)">Smart Briefing</p>
+    <h1 style="margin:8px 0 0;font-size:20px;font-weight:700;color:#fff">Novo briefing recebido</h1>
+  </td></tr>
+  <tr><td style="padding:28px 32px">
+    <table cellpadding="0" cellspacing="0" width="100%" style="background:#f7f7f5;border-radius:8px;margin-bottom:24px">
+      <tr><td style="padding:16px 20px">
+        <table cellpadding="0" cellspacing="0" width="100%">
+          <tr>
+            <td style="padding:6px 0;font-size:13px;color:#555;width:140px">Cliente</td>
+            <td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.clienteNome} <span style="color:#999;font-weight:400">(${p.clienteSigla})</span></td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;font-size:13px;color:#555">Solicitação</td>
+            <td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.taskName}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;font-size:13px;color:#555">Categoria</td>
+            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.categoria}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;font-size:13px;color:#555">Prazo sugerido</td>
+            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${prazoFmt}</td>
+          </tr>
+          <tr>
+            <td style="padding:6px 0;font-size:13px;color:#555">Solicitante</td>
+            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.solicitanteNome} &lt;${p.solicitanteEmail}&gt;</td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+    <a href="${p.taskUrl}" style="display:inline-block;background:#002bff;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:8px">Abrir no ClickUp →</a>
+  </td></tr>
+  <tr><td style="padding:16px 32px;border-top:1px solid #eee">
+    <p style="margin:0;font-size:11px;color:#999">Enviado automaticamente pelo Smart Briefing — painel Coevo</p>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+
+    // ── EMAIL EXTERNO (cliente/solicitante) ───────────────────────────────
+    const htmlExterno = `
+<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden">
+  <tr><td style="background:#002bff;padding:24px 32px">
+    <p style="margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.7)">Coevo • Smart Briefing</p>
+    <h1 style="margin:8px 0 0;font-size:20px;font-weight:700;color:#fff">Seu briefing foi recebido!</h1>
+  </td></tr>
+  <tr><td style="padding:28px 32px">
+    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6">Olá, <strong>${p.solicitanteNome}</strong>! Recebemos seu briefing e a equipe Coevo já foi notificada. Abaixo está o resumo do que foi enviado.</p>
+    <h2 style="margin:0 0 12px;font-size:15px;font-weight:700;color:#1a1a1a;border-bottom:2px solid #002bff;padding-bottom:8px">${p.taskName}</h2>
+    <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:24px">
+      <tr>
+        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;width:180px;vertical-align:top">Unidade</td>
+        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.clienteNome}</td>
+      </tr>
+      <tr style="background:#f7f7f5">
+        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Categoria</td>
+        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.categoria}</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Prazo sugerido</td>
+        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${prazoFmt}</td>
+      </tr>
+      ${camposHtml}
+    </table>
+    ${p.firstAiReply ? `
+    <div style="background:#f0f4ff;border-left:3px solid #002bff;border-radius:0 8px 8px 0;padding:16px 20px;margin-bottom:24px">
+      <p style="margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#002bff">Análise do Coevito</p>
+      <p style="margin:0;font-size:13px;color:#333;line-height:1.6;white-space:pre-wrap">${p.firstAiReply.replace(/\*\*/g,'').replace(/✓/g,'✓')}</p>
+    </div>` : ''}
+    <p style="margin:0 0 20px;font-size:13px;color:#555;line-height:1.6">Em breve a equipe entrará em contato pelo mesmo canal para dar continuidade. Se tiver qualquer dúvida, responda este email.</p>
+  </td></tr>
+  <tr><td style="padding:16px 32px;border-top:1px solid #eee;text-align:center">
+    <p style="margin:0;font-size:11px;color:#999">coevo.co — conectando vidas &amp; lugares</p>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+
+    // Dispara os dois emails em paralelo
+    const [resInterno, resExterno] = await Promise.all([
+      fetch(`${BREVO_BASE}/smtp/email`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          sender: SENDER,
+          to: EQUIPE,
+          replyTo: { email: p.solicitanteEmail, name: p.solicitanteNome },
+          subject: `[Briefing] ${p.taskName} — ${p.clienteNome}`,
+          htmlContent: htmlInterno,
+          tags: ['smart-briefing', 'interno'],
+        }),
+      }),
+      fetch(`${BREVO_BASE}/smtp/email`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          sender: SENDER,
+          to: [{ name: p.solicitanteNome, email: p.solicitanteEmail }],
+          replyTo: { email: 'mari@coevo.co', name: 'Mari • Coevo' },
+          subject: `Seu briefing foi recebido: ${p.taskName}`,
+          htmlContent: htmlExterno,
+          tags: ['smart-briefing', 'externo'],
+        }),
+      }),
+    ]);
+
+    const dInterno = await resInterno.json();
+    const dExterno = await resExterno.json();
+
+    if (!resInterno.ok || !resExterno.ok) {
+      return { error: `Brevo: interno=${JSON.stringify(dInterno)} externo=${JSON.stringify(dExterno)}` };
+    }
+    return { ok: true };
   } catch (err) {
     return { error: err.message };
   }
