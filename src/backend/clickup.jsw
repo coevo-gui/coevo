@@ -1,0 +1,178 @@
+// Backend: integração ClickUp — web method para a página Pauta
+// Lê CLICKUP_TOKEN do Wix Secrets Manager
+// Filtra por: pasta coevo.tudo + visível cliente = true + siglas do usuário + janela de 25 dias
+
+import { getSecret } from 'wix-secrets-backend';
+
+const TEAM_ID   = '3136006';
+const FOLDER_ID = '90133046139';
+const FIELD_CLI = 'e4ccb2ed-57e5-4f61-b82d-d09d85eee922'; // campo: Cliente (labels)
+const FIELD_VIS = 'a48bd8be-6225-4754-8773-ec88633cee5f'; // campo: visível cliente (checkbox)
+const MS_DIA    = 86400000;
+
+// Mapa sigla (uppercase) → { id: option_id no ClickUp, color: hex }
+// Nota: 'jcb' ainda está em minúsculo no ClickUp — renomear para JCB quando possível
+const SIGLAS = {
+  'SAG':                    { id: 'f4bff8fa-9b49-40a9-9157-5294bde39909', color: '#EA80FC' },
+  'VDS':                    { id: '56a53cf7-50d5-4e69-91ba-58058c950c7b', color: '#FF7FAB' },
+  'VAU':                    { id: '11ef933b-e937-4b91-843e-03127ef02d8a', color: '#aec0f5' },
+  'QDV':                    { id: 'c0d0bb9e-e0db-4405-89d4-f1a01ef1de79', color: '#8dcec3' },
+  'HCV':                    { id: '2e631c34-9e85-4742-b10b-23e4cb5dc0f3', color: '#04A9F4' },
+  'JCB':                    { id: '7d7b5725-4a6e-406c-af25-53496bdbd917', color: '#e9c162' },
+  'WGA':                    { id: '86963eee-d630-4651-a318-1ac3b78629dd', color: '#6647f0' },
+  'SIH':                    { id: '92c4c68a-5df8-4256-9369-b72e39fd5feb', color: '#e50000' },
+  'CJOI':                   { id: '44a73bde-b86b-45af-8ca5-0a90564f243c', color: '#b6b6ff' },
+  'HDF':                    { id: 'f1cb948e-8835-45c7-99c7-cea88140b8f1', color: '#f900ea' },
+  'AHI':                    { id: '68c08163-676c-410f-947e-29c34b818b8d', color: '#3082B7' },
+  'BRI':                    { id: '7ae41c60-efcb-4cf4-8177-e0f0f5c761ce', color: '#FF4081' },
+  'CDC':                    { id: 'ab87fae0-3c1d-41eb-b0cb-cf59290e406a', color: '#2ecd6f' },
+  'DYC':                    { id: '09692194-ce1d-4ed1-b663-81c535a13888', color: '#f9d900' },
+  'GUV':                    { id: 'e008e88d-4670-42c7-85e4-9453bbbd6910', color: '#96c7f2' },
+  'DISCOVERY CANYON':       { id: '63402385-c62d-4495-9e09-e1c3c8a6b3ca', color: '#3082B7' },
+  'COEVO.CO':               { id: '89ae49e3-b03e-44f4-ac49-f86e07ebc564', color: '#00c2e0' },
+  'FECITUR/MG':             { id: 'bb7de32e-3bc4-4434-bcfd-8fc6bd9649a0', color: '#800000' },
+  'FRADISSIMO':             { id: '4a05e501-a32d-447a-9d28-8e6910d2d2e1', color: '#f9d900' },
+  'VILA DO VALLE':          { id: '9699ed9d-5afe-4762-8e7c-25650c02ccee', color: '#800000' },
+  'PALADIO':                { id: 'e7b43e0d-08a2-430a-881b-2a6a086bc9ec', color: '#E65100' },
+  'MON':                    { id: '4646b60a-fb52-43ca-8347-74a50492a882', color: '#0231E8' },
+  'NANNAI':                 { id: 'a28c9219-ac4c-4a4c-8d92-b79761ae9691', color: '#e50000' },
+  'ALIARZ':                 { id: 'ace318d3-e5dc-4583-8d2a-5c0f712f2c99', color: '#3082B7' },
+  'SERRAS VERDES':          { id: 'bbc495b3-7b16-40ec-bf3d-13b4fd6d4291', color: '#FF7FAB' },
+  'SERRA DO CIPÓ':          { id: '9d242681-1e9e-464f-8324-5fcbd971140d', color: '#800000' },
+  'ROTA DO TRIANGULO':      { id: '4606f027-b54c-4108-bcd0-9233c5c62838', color: '#b5bcc2' },
+  'CAMPO DAS VERTENTES':    { id: 'a743b794-c780-4d4b-adf2-3d3ff18659fd', color: '#f900ea' },
+  'FECOMERCIO/MG':          { id: '703f3088-5a99-4bef-9d4e-9a3e6fb46907', color: '#667684' },
+  'ATMAN':                  { id: 'b56ac4b1-d2df-4a68-820b-a69548a8590c', color: '#7C4DFF' },
+  'MINAS REAL':             { id: 'c3a961c2-eaa9-4c86-ba05-85816aa57453', color: '#81B1FF' },
+  'URUPEMA':                { id: '9513f182-4529-4d81-bdef-67feaa17ef09', color: '#800000' },
+  'CASA OTTO':              { id: '273c982e-124d-4a8b-9f38-05049400a4ad', color: '#f900ea' },
+  'TIRADENTES':             { id: '92bdadd9-3adc-4240-bd72-e268117ad2a3', color: '#EA80FC' },
+  'ELA':                    { id: '7d2d1732-46b0-4fcc-a68f-796294125903', color: '#bf55ec' },
+  'SECULT':                 { id: 'f023087a-0e31-4671-a1d5-5227abeb484a', color: '#7C4DFF' },
+  'FLORIANI':               { id: '8e0ef711-e103-49b7-921c-f3edf185c673', color: '#bf55ec' },
+  'PARQUE GAIA':            { id: '9daeb7e1-39ac-4da1-bc52-ba4e5f6f7ad4', color: '#E65100' },
+  'PARQUE ITAMARÉ':         { id: 'ba433e5c-4782-4217-ba6a-e6d77e133ea6', color: '#2ecd6f' },
+  'FDR':                    { id: 'eee9cc5a-bb71-4862-ac26-0bdb16ac7776', color: '#0079bf' },
+  'CCP':                    { id: '4406c79e-e82f-485d-804d-1dc8e021f5f4', color: '#eb5a46' },
+  'FLUXX':                  { id: '81ca2be1-3225-4369-bcc8-59db62837e77', color: '#51e898' },
+  'FINAZ':                  { id: '3a082cca-48d4-4525-8811-3b52f1db0a62', color: '#81B1FF' },
+  'SDC':                    { id: '2437d30c-d21e-491a-b672-1b93df6c50b1', color: '#f2d600' },
+  'RESORTS BRASIL':         { id: 'a9dc2590-4c40-4ade-9de0-4493fdd673c6', color: '#1bbc9c' },
+  'OLDM':                   { id: '26eb8875-dba0-4faa-9dd3-44590f476c30', color: '#61bd4f' },
+  'ICBA':                   { id: 'abea1c5c-3a53-4e19-8404-e3b218fee5ce', color: '#7C4DFF' },
+  'SOFISTIC':               { id: '896a5fa3-7494-4d81-bcdc-2a3737f2cbcd', color: '#888888' },
+  'APRSW':                  { id: '954ec54b-c0bf-41fc-8e92-152626816370', color: '#3082B7' },
+  'PROSPECT':               { id: '10606cbe-e20c-427b-84fe-6d2edd378df5', color: '#ffab4a' },
+  'PROJURIS':               { id: '14e76b00-182d-4071-96be-e3be950322a4', color: '#3397dd' },
+  'MARTINELLI':             { id: '4a518609-b669-4109-9209-4b92f63927dc', color: '#1bbc9c' },
+  'CIDADE DAS FLORES':      { id: '6062667c-3de2-4241-b949-c5b0165cabc5', color: '#EA80FC' },
+  'THE STANDARD RESIDENCE': { id: 'db829c2f-8ed8-49f4-969d-8939016cbc0f', color: '#1bbc9c' },
+  'DISCOVER DEKALB':        { id: 'e71d6c79-d5c0-43de-ba70-9abcd13ca728', color: '#800000' },
+  'FG BIG WHEEL':           { id: '8196bcaa-9546-497a-8be0-8e303ca2ffe7', color: '#EA80FC' },
+};
+
+/**
+ * Retorna tarefas da pasta coevo.tudo filtradas para o usuário.
+ * @param {string[]|null} siglas - array de siglas acessíveis; null = coevo_admin (sem filtro de cliente)
+ * @returns {Promise<Object[]>}
+ */
+export async function getTarefasCliente(siglas) {
+  const token = await getSecret('CLICKUP_TOKEN');
+  const now   = Date.now();
+  const dueGt = now - 10 * MS_DIA;
+  const dueLt = now + 15 * MS_DIA;
+
+  const customFields = [
+    // visível cliente deve estar marcado
+    // Se não funcionar com "1", tente o valor booleano true
+    { field_id: FIELD_VIS, operator: '=', value: '1' },
+  ];
+
+  // Para admins (siglas === null), sem filtro de cliente
+  if (siglas !== null && siglas.length > 0) {
+    const optionIds = siglas
+      .map(s => SIGLAS[s.toUpperCase()]?.id)
+      .filter(Boolean);
+    if (optionIds.length > 0) {
+      customFields.push({
+        field_id: FIELD_CLI,
+        operator: 'ANY',
+        value: optionIds,
+      });
+    }
+  }
+
+  const url =
+    `https://api.clickup.com/api/v2/team/${TEAM_ID}/task` +
+    `?project_ids[]=${FOLDER_ID}` +
+    `&include_closed=true` +
+    `&due_date_gt=${dueGt}` +
+    `&due_date_lt=${dueLt}` +
+    `&custom_fields=${encodeURIComponent(JSON.stringify(customFields))}` +
+    `&order_by=due_date` +
+    `&reverse=false` +
+    `&page=0`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: token },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error('ClickUp API error:', res.status, body);
+    throw new Error(`ClickUp API ${res.status}`);
+  }
+
+  const { tasks = [] } = await res.json();
+  return _normalize(tasks, now);
+}
+
+function _normalize(tasks, now) {
+  return tasks
+    .map(t => {
+      const prazo    = t.due_date ? Number(t.due_date) : null;
+      const diasDiff = prazo !== null
+        ? Math.round((prazo - now) / MS_DIA)
+        : null;
+      const concluida = t.status?.type === 'closed';
+      const atrasada  = !concluida && diasDiff !== null && diasDiff < 0;
+
+      const clienteF   = (t.custom_fields || []).find(f => f.id === FIELD_CLI);
+      const siglaRaw   = clienteF?.value?.[0]?.label || '';
+      const sigla      = siglaRaw.toUpperCase();
+      const siglaColor = SIGLAS[sigla]?.color || '#6b7280';
+
+      const assignee    = t.assignees?.[0];
+      const responsavel = assignee
+        ? (assignee.username || assignee.email || '—')
+        : '—';
+
+      return {
+        _id:            t.id,
+        nome:           t.name || '',
+        status:         t.status?.status || '',
+        statusColor:    t.status?.color || '#9ca3af',
+        prazo,
+        prazoFormatado: prazo
+          ? new Date(prazo).toLocaleDateString('pt-BR', {
+              day: '2-digit', month: 'short', year: 'numeric',
+            })
+          : '—',
+        lista:          t.list?.name || '',
+        responsavel,
+        descricao:      (t.description || '').slice(0, 180).trim(),
+        url:            t.url || '#',
+        atrasada,
+        diasAtraso:     atrasada ? Math.abs(diasDiff) : 0,
+        diasFaltam:     (!atrasada && !concluida && diasDiff !== null) ? diasDiff : 0,
+        sigla,
+        siglaColor,
+        concluida,
+      };
+    })
+    .sort((a, b) => {
+      if (a.atrasada  !== b.atrasada)  return a.atrasada  ? -1 : 1;
+      if (a.concluida !== b.concluida) return a.concluida ?  1 : -1;
+      return (a.prazo || 0) - (b.prazo || 0);
+    });
+}
