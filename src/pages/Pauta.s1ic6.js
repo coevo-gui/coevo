@@ -1,6 +1,6 @@
 // Página: Pauta — /portal/pauta
 // Tipo: Página de membro personalizada (privada)
-// Exibe tarefas do ClickUp (pasta coevo.tudo) filtradas por acesso e visibilidade
+// 3 repeaters separados por seção: atrasadas, próximas, concluídas
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -24,7 +24,7 @@ $w.onReady(async () => {
 
     const acesso = acessoResult.items[0];
 
-    // null = coevo_admin: sem filtro de cliente (vê tudo)
+    // null = coevo_admin: sem filtro de cliente
     let siglas = null;
 
     if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
@@ -44,7 +44,9 @@ $w.onReady(async () => {
 
     if (siglas !== null && siglas.length === 0) {
       $w('#textPautaTotal').text = '0 tarefas';
-      $w('#repeaterPauta').data = [];
+      $w('#containerAtrasadas').hide();
+      $w('#containerProximas').hide();
+      $w('#containerConcluidas').hide();
       return;
     }
 
@@ -53,50 +55,116 @@ $w.onReady(async () => {
     $w('#textPautaTotal').text =
       `${tarefas.length} tarefa${tarefas.length !== 1 ? 's' : ''}`;
 
-    $w('#repeaterPauta').onItemReady(($item, t) => {
-      $item('#tagSigla').text = t.sigla || '—';
-      $item('#tagSigla').style.color = t.siglaColor;
+    const atrasadas  = tarefas.filter(t => t.atrasada);
+    const proximas   = tarefas.filter(t => !t.atrasada && !t.concluida);
+    const concluidas = tarefas.filter(t => t.concluida);
 
-      $item('#textNomeTarefa').text = t.nome;
+    // ---------- SEÇÃO: ATRASADAS ----------
+    if (atrasadas.length) {
+      $w('#containerAtrasadas').show();
 
-      $item('#tagStatus').text = `● ${t.status}`;
-      $item('#tagStatus').style.color = t.statusColor;
+      $w('#repeaterAtrasadas').onItemReady(($item, t) => {
+        $item('#tagSigla').text = t.sigla || '—';
+        $item('#tagSigla').style.color = t.siglaColor;
 
-      $item('#textPrazo').text       = t.prazoFormatado;
-      $item('#textLista').text       = t.lista;
-      $item('#textResponsavel').text = t.responsavel;
+        $item('#textNomeTarefa').text = t.nome;
 
-      if (t.atrasada) {
-        $item('#tagAtraso').text =
-          t.diasAtraso === 1
-            ? '1 dia em atraso'
-            : `${t.diasAtraso} dias em atraso`;
-        $item('#tagAtraso').show();
-        $item('#textDiasFaltam').hide();
-      } else if (!t.concluida) {
-        $item('#textDiasFaltam').text =
-          t.diasFaltam === 0 ? 'vence hoje' :
-          t.diasFaltam === 1 ? 'em 1 dia'   :
-          `em ${t.diasFaltam} dias`;
-        $item('#textDiasFaltam').show();
-        $item('#tagAtraso').hide();
-      } else {
-        $item('#tagAtraso').hide();
-        $item('#textDiasFaltam').hide();
-      }
+        $item('#tagAtraso').text = t.diasAtraso === 1
+          ? '1 dia em atraso'
+          : `${t.diasAtraso} dias em atraso`;
 
-      if (t.descricao) {
-        $item('#textDescricao').text = t.descricao;
-        $item('#textDescricao').show();
-      } else {
-        $item('#textDescricao').hide();
-      }
+        $item('#tagStatus').text = `● ${t.status}`;
+        $item('#tagStatus').style.color = t.statusColor;
 
-      $item('#btnAbrirTarefa').link   = t.url;
-      $item('#btnAbrirTarefa').target = '_blank';
-    });
+        $item('#textPrazo').text       = t.prazoFormatado;
+        $item('#textLista').text       = t.lista;
+        $item('#textResponsavel').text = t.responsavel;
 
-    $w('#repeaterPauta').data = tarefas;
+        if (t.descricao) {
+          $item('#textDescricao').text = t.descricao;
+          $item('#textDescricao').show();
+        } else {
+          $item('#textDescricao').hide();
+        }
+
+        $item('#btnAbrirTarefa').link   = t.url;
+        $item('#btnAbrirTarefa').target = '_blank';
+      });
+
+      $w('#repeaterAtrasadas').data = atrasadas;
+    } else {
+      $w('#containerAtrasadas').hide();
+    }
+
+    // ---------- SEÇÃO: PRÓXIMAS ----------
+    if (proximas.length) {
+      $w('#containerProximas').show();
+
+      $w('#repeaterProximas').onItemReady(($item, t) => {
+        $item('#tagSigla2').text = t.sigla || '—';
+        $item('#tagSigla2').style.color = t.siglaColor;
+
+        $item('#textNomeTarefa2').text = t.nome;
+
+        $item('#textDiasFaltam').text = t.diasFaltam === 0 ? 'vence hoje'
+          : t.diasFaltam === 1 ? 'em 1 dia'
+          : `em ${t.diasFaltam} dias`;
+
+        $item('#tagStatus2').text = `● ${t.status}`;
+        $item('#tagStatus2').style.color = t.statusColor;
+
+        $item('#textPrazo2').text       = t.prazoFormatado;
+        $item('#textLista2').text       = t.lista;
+        $item('#textResponsavel2').text = t.responsavel;
+
+        if (t.descricao) {
+          $item('#textDescricao2').text = t.descricao;
+          $item('#textDescricao2').show();
+        } else {
+          $item('#textDescricao2').hide();
+        }
+
+        $item('#btnAbrirTarefa2').link   = t.url;
+        $item('#btnAbrirTarefa2').target = '_blank';
+      });
+
+      $w('#repeaterProximas').data = proximas;
+    } else {
+      $w('#containerProximas').hide();
+    }
+
+    // ---------- SEÇÃO: CONCLUÍDAS ----------
+    if (concluidas.length) {
+      $w('#containerConcluidas').show();
+
+      $w('#repeaterConcluidas').onItemReady(($item, t) => {
+        $item('#tagSigla3').text = t.sigla || '—';
+        $item('#tagSigla3').style.color = t.siglaColor;
+
+        $item('#textNomeTarefa3').text = t.nome;
+
+        $item('#tagStatus3').text = `● ${t.status}`;
+        $item('#tagStatus3').style.color = t.statusColor;
+
+        $item('#textPrazo3').text       = t.prazoFormatado;
+        $item('#textLista3').text       = t.lista;
+        $item('#textResponsavel3').text = t.responsavel;
+
+        if (t.descricao) {
+          $item('#textDescricao3').text = t.descricao;
+          $item('#textDescricao3').show();
+        } else {
+          $item('#textDescricao3').hide();
+        }
+
+        $item('#btnAbrirTarefa3').link   = t.url;
+        $item('#btnAbrirTarefa3').target = '_blank';
+      });
+
+      $w('#repeaterConcluidas').data = concluidas;
+    } else {
+      $w('#containerConcluidas').hide();
+    }
 
   } catch (err) {
     console.error('Erro na página Pauta:', err);
