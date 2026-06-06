@@ -1,11 +1,19 @@
 // Página: Pauta — /portal/pauta
 // Tipo: Página de membro personalizada (privada)
 // 3 repeaters separados por seção: atrasadas, próximas, concluídas
+//
+// Nota: #containerAtrasadas, #containerProximas, #containerConcluidas
+// devem ser elementos Box (não Section) para que collapse/expand funcione.
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
 import { getTarefasCliente } from 'backend/clickup.jsw';
+
+// collapse/expand funcionam em Box e removem o espaço do layout.
+// show/hide não funcionam em Section elements.
+function exibir(id)  { try { $w(id).expand();   } catch (_) {} }
+function ocultar(id) { try { $w(id).collapse(); } catch (_) {} }
 
 $w.onReady(async () => {
   try {
@@ -44,9 +52,9 @@ $w.onReady(async () => {
 
     if (siglas !== null && siglas.length === 0) {
       $w('#textPautaTotal').text = '0 tarefas';
-      $w('#containerAtrasadas').hide();
-      $w('#containerProximas').hide();
-      $w('#containerConcluidas').hide();
+      ocultar('#containerAtrasadas');
+      ocultar('#containerProximas');
+      ocultar('#containerConcluidas');
       return;
     }
 
@@ -61,7 +69,7 @@ $w.onReady(async () => {
 
     // ---------- SEÇÃO: ATRASADAS ----------
     if (atrasadas.length) {
-      $w('#containerAtrasadas').show();
+      exibir('#containerAtrasadas');
 
       $w('#repeaterAtrasadas').onItemReady(($item, t) => {
         $item('#tagSigla').text = t.sigla || '—';
@@ -82,9 +90,9 @@ $w.onReady(async () => {
 
         if (t.descricao) {
           $item('#textDescricao').text = t.descricao;
-          $item('#textDescricao').show();
+          try { $item('#textDescricao').expand(); } catch (_) {}
         } else {
-          $item('#textDescricao').hide();
+          try { $item('#textDescricao').collapse(); } catch (_) {}
         }
 
         $item('#btnAbrirTarefa').link   = t.url;
@@ -93,12 +101,12 @@ $w.onReady(async () => {
 
       $w('#repeaterAtrasadas').data = atrasadas;
     } else {
-      $w('#containerAtrasadas').hide();
+      ocultar('#containerAtrasadas');
     }
 
     // ---------- SEÇÃO: PRÓXIMAS ----------
     if (proximas.length) {
-      $w('#containerProximas').show();
+      exibir('#containerProximas');
 
       $w('#repeaterProximas').onItemReady(($item, t) => {
         $item('#tagSigla2').text = t.sigla || '—';
@@ -106,7 +114,8 @@ $w.onReady(async () => {
 
         $item('#textNomeTarefa2').text = t.nome;
 
-        $item('#textDiasFaltam').text = t.diasFaltam === 0 ? 'vence hoje'
+        $item('#textDiasFaltam').text =
+          t.diasFaltam === 0 ? 'vence hoje'
           : t.diasFaltam === 1 ? 'em 1 dia'
           : `em ${t.diasFaltam} dias`;
 
@@ -119,9 +128,9 @@ $w.onReady(async () => {
 
         if (t.descricao) {
           $item('#textDescricao2').text = t.descricao;
-          $item('#textDescricao2').show();
+          try { $item('#textDescricao2').expand(); } catch (_) {}
         } else {
-          $item('#textDescricao2').hide();
+          try { $item('#textDescricao2').collapse(); } catch (_) {}
         }
 
         $item('#btnAbrirTarefa2').link   = t.url;
@@ -130,12 +139,12 @@ $w.onReady(async () => {
 
       $w('#repeaterProximas').data = proximas;
     } else {
-      $w('#containerProximas').hide();
+      ocultar('#containerProximas');
     }
 
     // ---------- SEÇÃO: CONCLUÍDAS ----------
     if (concluidas.length) {
-      $w('#containerConcluidas').show();
+      exibir('#containerConcluidas');
 
       $w('#repeaterConcluidas').onItemReady(($item, t) => {
         $item('#tagSigla3').text = t.sigla || '—';
@@ -152,9 +161,9 @@ $w.onReady(async () => {
 
         if (t.descricao) {
           $item('#textDescricao3').text = t.descricao;
-          $item('#textDescricao3').show();
+          try { $item('#textDescricao3').expand(); } catch (_) {}
         } else {
-          $item('#textDescricao3').hide();
+          try { $item('#textDescricao3').collapse(); } catch (_) {}
         }
 
         $item('#btnAbrirTarefa3').link   = t.url;
@@ -163,7 +172,7 @@ $w.onReady(async () => {
 
       $w('#repeaterConcluidas').data = concluidas;
     } else {
-      $w('#containerConcluidas').hide();
+      ocultar('#containerConcluidas');
     }
 
   } catch (err) {
