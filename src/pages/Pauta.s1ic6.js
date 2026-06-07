@@ -1,6 +1,3 @@
-// Página: Pauta — /portal/pauta
-// 1 repeater + 5 filtros client-side
-
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
@@ -25,11 +22,9 @@ const BTNS = {
 };
 
 function aplicarFiltro(tipo) {
-  // Indica filtro ativo via cor do texto (único recurso disponível em Velo)
   Object.keys(BTNS).forEach(key => {
     try { $w(BTNS[key]).style.color = key === tipo ? '#002bff' : '#6b7280'; } catch (_) {}
   });
-
   const filtradas = todasTarefas.filter(FILTROS[tipo]);
   $w('#textPautaTotal').text = `${filtradas.length} tarefa${filtradas.length !== 1 ? 's' : ''}`;
   $w('#repeaterPauta').data = filtradas;
@@ -63,31 +58,51 @@ $w.onReady(async () => {
 
     todasTarefas = await getTarefasCliente(siglas);
 
-    // Labels dos chips com contagem (calculados uma vez, não mudam ao filtrar)
     $w('#btnFiltroTodas').label      = `Todas (${todasTarefas.length})`;
     $w('#btnFiltroAtrasadas').label  = `Atrasadas (${todasTarefas.filter(FILTROS.atrasadas).length})`;
     $w('#btnFiltroAprovacao').label  = `Em aprovação (${todasTarefas.filter(FILTROS.aprovacao).length})`;
     $w('#btnFiltroSemana').label     = `Esta semana (${todasTarefas.filter(FILTROS.semana).length})`;
     $w('#btnFiltroConcluidas').label = `Concluídas (${todasTarefas.filter(FILTROS.concluidas).length})`;
 
-    // Click handlers dos chips
     $w('#btnFiltroTodas').onClick(()      => aplicarFiltro('todas'));
     $w('#btnFiltroAtrasadas').onClick(()  => aplicarFiltro('atrasadas'));
     $w('#btnFiltroAprovacao').onClick(()  => aplicarFiltro('aprovacao'));
     $w('#btnFiltroSemana').onClick(()     => aplicarFiltro('semana'));
     $w('#btnFiltroConcluidas').onClick(() => aplicarFiltro('concluidas'));
 
-    // Repeater — onItemReady registrado uma vez
     $w('#repeaterPauta').onItemReady(($item, t) => {
 
-      // Sigla
+      // --- Cor do card por estado ---
+      // Tenta style.backgroundColor (funciona em Box se suportado pelo Velo)
+      // e opacity para concluídas. Ambos falham silenciosamente se não houver suporte.
+      try {
+        const bgMap = {
+          atrasada:  '#fffbfb',
+          aprovacao: '#fffdf5',
+          concluida: '#f9fafb',
+          normal:    '#ffffff',
+        };
+        const estado = t.atrasada ? 'atrasada'
+          : t.statusNorm.includes('aprova') ? 'aprovacao'
+          : t.concluida ? 'concluida'
+          : 'normal';
+        $item('#boxCard').style.backgroundColor = bgMap[estado];
+      } catch (_) {}
+
+      // Opacidade reduzida para concluídas
+      try {
+        $item('#boxCard').opacity = t.concluida ? 0.65 : 1;
+      } catch (_) {}
+
+      // --- Sigla ---
       $item('#tagSigla').text = t.sigla || '—';
       $item('#tagSigla').style.color = t.siglaColor;
 
-      // Nome
+      // --- Nome (acinzentado para concluídas) ---
       $item('#textNomeTarefa').text = t.nome;
+      $item('#textNomeTarefa').style.color = t.concluida ? '#9ca3af' : '#111827';
 
-      // Badge temporal unificado (#tagTemporal)
+      // --- Badge temporal unificado ---
       if (t.atrasada) {
         $item('#tagTemporal').text = t.diasAtraso === 1 ? '1 dia em atraso' : `${t.diasAtraso} dias em atraso`;
         $item('#tagTemporal').style.color = '#f25252';
@@ -105,23 +120,23 @@ $w.onReady(async () => {
         $item('#tagTemporal').style.color = '#04bfae';
       }
 
-      // Status
+      // --- Status ---
       $item('#tagStatus').text = `● ${t.status}`;
       $item('#tagStatus').style.color = t.statusColor;
 
-      // Meta
+      // --- Meta ---
       $item('#textPrazo').text       = t.prazoFormatado;
       $item('#textLista').text       = t.lista;
       $item('#textResponsavel').text = t.responsavel;
 
-      // Ponto de atividade recente
+      // --- Ponto de atividade recente ---
       try {
         t.recenteAtividade
           ? $item('#dotAtividade').expand()
           : $item('#dotAtividade').collapse();
       } catch (_) {}
 
-      // Descrição + toggle
+      // --- Descrição + toggle ---
       if (t.descricao) {
         $item('#textDescricao').text = t.descricao;
         try { $item('#btnVerDescricao').expand(); } catch (_) {}
@@ -139,12 +154,11 @@ $w.onReady(async () => {
         try { $item('#btnVerDescricao').collapse(); } catch (_) {}
       }
 
-      // Link
+      // --- Link ---
       $item('#btnAbrirTarefa').link   = t.url;
       $item('#btnAbrirTarefa').target = '_blank';
     });
 
-    // Exibe todas as tarefas por padrão
     aplicarFiltro('todas');
 
   } catch (err) {
