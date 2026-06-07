@@ -1,17 +1,11 @@
-// Backend: integração ClickUp — web method para a página Pauta
-// Lê CLICKUP_TOKEN do Wix Secrets Manager
-// Filtra por: pasta coevo.tudo + visível cliente = true + siglas do usuário + janela de 25 dias
-
 import { getSecret } from 'wix-secrets-backend';
 
 const TEAM_ID   = '3136006';
 const FOLDER_ID = '90133046139';
-const FIELD_CLI = 'e4ccb2ed-57e5-4f61-b82d-d09d85eee922'; // campo: Cliente (labels)
-const FIELD_VIS = 'a48bd8be-6225-4754-8773-ec88633cee5f'; // campo: visível cliente (checkbox)
+const FIELD_CLI = 'e4ccb2ed-57e5-4f61-b82d-d09d85eee922';
+const FIELD_VIS = 'a48bd8be-6225-4754-8773-ec88633cee5f';
 const MS_DIA    = 86400000;
 
-// Mapa sigla (uppercase) → { id: option_id no ClickUp, color: hex }
-// Nota: 'jcb' ainda está em minúsculo no ClickUp — renomear para JCB quando possível
 const SIGLAS = {
   'SAG':                    { id: 'f4bff8fa-9b49-40a9-9157-5294bde39909', color: '#EA80FC' },
   'VDS':                    { id: '56a53cf7-50d5-4e69-91ba-58058c950c7b', color: '#FF7FAB' },
@@ -71,11 +65,6 @@ const SIGLAS = {
   'FG BIG WHEEL':           { id: '8196bcaa-9546-497a-8be0-8e303ca2ffe7', color: '#EA80FC' },
 };
 
-/**
- * Retorna tarefas da pasta coevo.tudo filtradas para o usuário.
- * @param {string[]|null} siglas - array de siglas acessíveis; null = coevo_admin (sem filtro de cliente)
- * @returns {Promise<Object[]>}
- */
 export async function getTarefasCliente(siglas) {
   const token = await getSecret('CLICKUP_TOKEN');
   const now   = Date.now();
@@ -83,22 +72,15 @@ export async function getTarefasCliente(siglas) {
   const dueLt = now + 15 * MS_DIA;
 
   const customFields = [
-    // visível cliente deve estar marcado
-    // Se não funcionar com "1", tente o valor booleano true
     { field_id: FIELD_VIS, operator: '=', value: '1' },
   ];
 
-  // Para admins (siglas === null), sem filtro de cliente
   if (siglas !== null && siglas.length > 0) {
     const optionIds = siglas
       .map(s => SIGLAS[s.toUpperCase()]?.id)
       .filter(Boolean);
     if (optionIds.length > 0) {
-      customFields.push({
-        field_id: FIELD_CLI,
-        operator: 'ANY',
-        value: optionIds,
-      });
+      customFields.push({ field_id: FIELD_CLI, operator: 'ANY', value: optionIds });
     }
   }
 
@@ -113,9 +95,7 @@ export async function getTarefasCliente(siglas) {
     `&reverse=false` +
     `&page=0`;
 
-  const res = await fetch(url, {
-    headers: { Authorization: token },
-  });
+  const res = await fetch(url, { headers: { Authorization: token } });
 
   if (!res.ok) {
     const body = await res.text();
@@ -131,9 +111,7 @@ function _normalize(tasks, now) {
   return tasks
     .map(t => {
       const prazo    = t.due_date ? Number(t.due_date) : null;
-      const diasDiff = prazo !== null
-        ? Math.round((prazo - now) / MS_DIA)
-        : null;
+      const diasDiff = prazo !== null ? Math.round((prazo - now) / MS_DIA) : null;
       const concluida = t.status?.type === 'closed';
       const atrasada  = !concluida && diasDiff !== null && diasDiff < 0;
 
@@ -143,31 +121,36 @@ function _normalize(tasks, now) {
       const siglaColor = SIGLAS[sigla]?.color || '#6b7280';
 
       const assignee    = t.assignees?.[0];
-      const responsavel = assignee
-        ? (assignee.username || assignee.email || '—')
-        : '—';
+      const responsavel = assignee ? (assignee.username || assignee.email || '—') : '—';
+
+      // status normalizado sem acentos — usado no filtro "em aprovação" client-side
+      const statusNorm = (t.status?.status || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
 
       return {
-        _id:            t.id,
-        nome:           t.name || '',
-        status:         t.status?.status || '',
-        statusColor:    t.status?.color || '#9ca3af',
+        _id:             t.id,
+        nome:            t.name || '',
+        status:          t.status?.status || '',
+        statusColor:     t.status?.color || '#9ca3af',
+        statusNorm,
         prazo,
-        prazoFormatado: prazo
-          ? new Date(prazo).toLocaleDateString('pt-BR', {
-              day: '2-digit', month: 'short', year: 'numeric',
-            })
+        prazoFormatado:  prazo
+          ? new Date(prazo).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
           : '—',
-        lista:          t.list?.name || '',
+        lista:           t.list?.name || '',
         responsavel,
-        descricao:      (t.description || '').slice(0, 180).trim(),
-        url:            t.url || '#',
+        descricao:       (t.description || '').slice(0, 180).trim(),
+        url:             t.url || '#',
         atrasada,
-        diasAtraso:     atrasada ? Math.abs(diasDiff) : 0,
-        diasFaltam:     (!atrasada && !concluida && diasDiff !== null) ? diasDiff : 0,
+        diasAtraso:      atrasada ? Math.abs(diasDiff) : 0,
+        diasFaltam:      (!atrasada && !concluida && diasDiff !== null) ? diasDiff : 0,
         sigla,
         siglaColor,
         concluida,
+        // ponto roxo: atualizado nas últimas 48h
+        recenteAtividade: t.date_updated ? (now - Number(t.date_updated)) < 2 * MS_DIA : false,
       };
     })
     .sort((a, b) => {

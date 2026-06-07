@@ -1,201 +1,151 @@
 // Página: Pauta — /portal/pauta
-// Tipo: Página de membro personalizada (privada)
+// 1 repeater + 5 filtros client-side
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
 import { getTarefasCliente } from 'backend/clickup.jsw';
 
-function exibir(id)  { try { $w(id).expand();   } catch (_) {} }
-function ocultar(id) { try { $w(id).collapse(); } catch (_) {} }
+let todasTarefas = [];
 
-// Toggle genérico para seções: colapsa/expande o repeater e atualiza label do botão
-function configurarToggleSecao(btnId, repId) {
-  $w(btnId).onClick(() => {
-    const rep = $w(repId);
-    if (rep.collapsed) {
-      rep.expand();
-      $w(btnId).label = '▲';
-    } else {
-      rep.collapse();
-      $w(btnId).label = '▼';
-    }
-  });
-}
+const FILTROS = {
+  todas:      ()  => true,
+  atrasadas:  t   => t.atrasada,
+  aprovacao:  t   => t.statusNorm.includes('aprova'),
+  semana:     t   => !t.atrasada && !t.concluida && t.diasFaltam <= 7,
+  concluidas: t   => t.concluida,
+};
 
-// Toggle de descrição dentro de um item de repeater
-function configurarToggleDescricao($item, descId, btnId, temDescricao) {
-  if (!temDescricao) {
-    try { $item(btnId).collapse(); } catch (_) {}
-    return;
-  }
-  try { $item(btnId).expand(); } catch (_) {}
-  $item(btnId).label = 'ver mais ↓';
-  $item(btnId).onClick(() => {
-    if ($item(descId).collapsed) {
-      $item(descId).expand();
-      $item(btnId).label = 'ocultar ↑';
-    } else {
-      $item(descId).collapse();
-      $item(btnId).label = 'ver mais ↓';
-    }
+const BTNS = {
+  todas:      '#btnFiltroTodas',
+  atrasadas:  '#btnFiltroAtrasadas',
+  aprovacao:  '#btnFiltroAprovacao',
+  semana:     '#btnFiltroSemana',
+  concluidas: '#btnFiltroConcluidas',
+};
+
+function aplicarFiltro(tipo) {
+  // Indica filtro ativo via cor do texto (único recurso disponível em Velo)
+  Object.keys(BTNS).forEach(key => {
+    try { $w(BTNS[key]).style.color = key === tipo ? '#002bff' : '#6b7280'; } catch (_) {}
   });
+
+  const filtradas = todasTarefas.filter(FILTROS[tipo]);
+  $w('#textPautaTotal').text = `${filtradas.length} tarefa${filtradas.length !== 1 ? 's' : ''}`;
+  $w('#repeaterPauta').data = filtradas;
 }
 
 $w.onReady(async () => {
   try {
     const member = await currentMember.getMember();
-    if (!member) {
-      wixLocation.to('/login');
-      return;
-    }
+    if (!member) { wixLocation.to('/login'); return; }
 
     const acessoResult = await wixData
-      .query('acessoUsuario')
-      .eq('memberId', member._id)
-      .find();
-
+      .query('acessoUsuario').eq('memberId', member._id).find();
     if (!acessoResult.items.length) return;
 
     const acesso = acessoResult.items[0];
     let siglas = null;
 
     if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
-      const r = await wixData
-        .query('subclientes')
-        .eq('clienteRef', acesso.clienteRef)
-        .find();
+      const r = await wixData.query('subclientes').eq('clienteRef', acesso.clienteRef).find();
       siglas = r.items.map(s => s.sigla).filter(Boolean);
     } else if (acesso.nivel === 'cliente_unidade') {
-      const refs = await wixData.queryReferenced(
-        'acessoUsuario',
-        acesso._id,
-        'subclientes'
-      );
+      const refs = await wixData.queryReferenced('acessoUsuario', acesso._id, 'subclientes');
       siglas = refs.items.map(s => s.sigla).filter(Boolean);
     }
 
     if (siglas !== null && siglas.length === 0) {
       $w('#textPautaTotal').text = '0 tarefas';
-      ocultar('#containerAtrasadas');
-      ocultar('#containerProximas');
-      ocultar('#containerConcluidas');
+      $w('#repeaterPauta').data = [];
       return;
     }
 
-    const tarefas = await getTarefasCliente(siglas);
+    todasTarefas = await getTarefasCliente(siglas);
 
-    $w('#textPautaTotal').text =
-      `${tarefas.length} tarefa${tarefas.length !== 1 ? 's' : ''}`;
+    // Labels dos chips com contagem (calculados uma vez, não mudam ao filtrar)
+    $w('#btnFiltroTodas').label      = `Todas (${todasTarefas.length})`;
+    $w('#btnFiltroAtrasadas').label  = `Atrasadas (${todasTarefas.filter(FILTROS.atrasadas).length})`;
+    $w('#btnFiltroAprovacao').label  = `Em aprovação (${todasTarefas.filter(FILTROS.aprovacao).length})`;
+    $w('#btnFiltroSemana').label     = `Esta semana (${todasTarefas.filter(FILTROS.semana).length})`;
+    $w('#btnFiltroConcluidas').label = `Concluídas (${todasTarefas.filter(FILTROS.concluidas).length})`;
 
-    const atrasadas  = tarefas.filter(t => t.atrasada);
-    const proximas   = tarefas.filter(t => !t.atrasada && !t.concluida);
-    const concluidas = tarefas.filter(t => t.concluida);
+    // Click handlers dos chips
+    $w('#btnFiltroTodas').onClick(()      => aplicarFiltro('todas'));
+    $w('#btnFiltroAtrasadas').onClick(()  => aplicarFiltro('atrasadas'));
+    $w('#btnFiltroAprovacao').onClick(()  => aplicarFiltro('aprovacao'));
+    $w('#btnFiltroSemana').onClick(()     => aplicarFiltro('semana'));
+    $w('#btnFiltroConcluidas').onClick(() => aplicarFiltro('concluidas'));
 
-    // ---------- SEÇÃO: ATRASADAS ----------
-    if (atrasadas.length) {
-      exibir('#containerAtrasadas');
-      configurarToggleSecao('#btnToggleAtrasadas', '#repeaterAtrasadas');
+    // Repeater — onItemReady registrado uma vez
+    $w('#repeaterPauta').onItemReady(($item, t) => {
 
-      $w('#repeaterAtrasadas').onItemReady(($item, t) => {
-        $item('#tagSigla').text = t.sigla || '—';
-        $item('#tagSigla').style.color = t.siglaColor;
+      // Sigla
+      $item('#tagSigla').text = t.sigla || '—';
+      $item('#tagSigla').style.color = t.siglaColor;
 
-        $item('#textNomeTarefa').text = t.nome;
+      // Nome
+      $item('#textNomeTarefa').text = t.nome;
 
-        $item('#tagAtraso').text = t.diasAtraso === 1
-          ? '1 dia em atraso'
-          : `${t.diasAtraso} dias em atraso`;
+      // Badge temporal unificado (#tagTemporal)
+      if (t.atrasada) {
+        $item('#tagTemporal').text = t.diasAtraso === 1 ? '1 dia em atraso' : `${t.diasAtraso} dias em atraso`;
+        $item('#tagTemporal').style.color = '#f25252';
+      } else if (t.concluida) {
+        $item('#tagTemporal').text = 'concluído';
+        $item('#tagTemporal').style.color = '#10b981';
+      } else if (t.statusNorm.includes('aprova')) {
+        $item('#tagTemporal').text = 'aguardando aprovação';
+        $item('#tagTemporal').style.color = '#c9a400';
+      } else {
+        $item('#tagTemporal').text =
+          t.diasFaltam === 0 ? 'vence hoje' :
+          t.diasFaltam === 1 ? 'em 1 dia'   :
+          `em ${t.diasFaltam} dias`;
+        $item('#tagTemporal').style.color = '#04bfae';
+      }
 
-        $item('#tagStatus').text = `● ${t.status}`;
-        $item('#tagStatus').style.color = t.statusColor;
+      // Status
+      $item('#tagStatus').text = `● ${t.status}`;
+      $item('#tagStatus').style.color = t.statusColor;
 
-        $item('#textPrazo').text       = t.prazoFormatado;
-        $item('#textLista').text       = t.lista;
-        $item('#textResponsavel').text = t.responsavel;
+      // Meta
+      $item('#textPrazo').text       = t.prazoFormatado;
+      $item('#textLista').text       = t.lista;
+      $item('#textResponsavel').text = t.responsavel;
 
-        if (t.descricao) {
-          $item('#textDescricao').text = t.descricao;
-        }
-        configurarToggleDescricao($item, '#textDescricao', '#btnVerDescricao', !!t.descricao);
+      // Ponto de atividade recente
+      try {
+        t.recenteAtividade
+          ? $item('#dotAtividade').expand()
+          : $item('#dotAtividade').collapse();
+      } catch (_) {}
 
-        $item('#btnAbrirTarefa').link   = t.url;
-        $item('#btnAbrirTarefa').target = '_blank';
-      });
+      // Descrição + toggle
+      if (t.descricao) {
+        $item('#textDescricao').text = t.descricao;
+        try { $item('#btnVerDescricao').expand(); } catch (_) {}
+        $item('#btnVerDescricao').label = 'ver mais ↓';
+        $item('#btnVerDescricao').onClick(() => {
+          if ($item('#textDescricao').collapsed) {
+            $item('#textDescricao').expand();
+            $item('#btnVerDescricao').label = 'ocultar ↑';
+          } else {
+            $item('#textDescricao').collapse();
+            $item('#btnVerDescricao').label = 'ver mais ↓';
+          }
+        });
+      } else {
+        try { $item('#btnVerDescricao').collapse(); } catch (_) {}
+      }
 
-      $w('#repeaterAtrasadas').data = atrasadas;
-    } else {
-      ocultar('#containerAtrasadas');
-    }
+      // Link
+      $item('#btnAbrirTarefa').link   = t.url;
+      $item('#btnAbrirTarefa').target = '_blank';
+    });
 
-    // ---------- SEÇÃO: PRÓXIMAS ----------
-    if (proximas.length) {
-      exibir('#containerProximas');
-      configurarToggleSecao('#btnToggleProximas', '#repeaterProximas');
-
-      $w('#repeaterProximas').onItemReady(($item, t) => {
-        $item('#tagSigla2').text = t.sigla || '—';
-        $item('#tagSigla2').style.color = t.siglaColor;
-
-        $item('#textNomeTarefa2').text = t.nome;
-
-        $item('#textDiasFaltam').text =
-          t.diasFaltam === 0 ? 'vence hoje'
-          : t.diasFaltam === 1 ? 'em 1 dia'
-          : `em ${t.diasFaltam} dias`;
-
-        $item('#tagStatus2').text = `● ${t.status}`;
-        $item('#tagStatus2').style.color = t.statusColor;
-
-        $item('#textPrazo2').text       = t.prazoFormatado;
-        $item('#textLista2').text       = t.lista;
-        $item('#textResponsavel2').text = t.responsavel;
-
-        if (t.descricao) {
-          $item('#textDescricao2').text = t.descricao;
-        }
-        configurarToggleDescricao($item, '#textDescricao2', '#btnVerDescricao2', !!t.descricao);
-
-        $item('#btnAbrirTarefa2').link   = t.url;
-        $item('#btnAbrirTarefa2').target = '_blank';
-      });
-
-      $w('#repeaterProximas').data = proximas;
-    } else {
-      ocultar('#containerProximas');
-    }
-
-    // ---------- SEÇÃO: CONCLUÍDAS ----------
-    if (concluidas.length) {
-      exibir('#containerConcluidas');
-      configurarToggleSecao('#btnToggleConcluidas', '#repeaterConcluidas');
-
-      $w('#repeaterConcluidas').onItemReady(($item, t) => {
-        $item('#tagSigla3').text = t.sigla || '—';
-        $item('#tagSigla3').style.color = t.siglaColor;
-
-        $item('#textNomeTarefa3').text = t.nome;
-
-        $item('#tagStatus3').text = `● ${t.status}`;
-        $item('#tagStatus3').style.color = t.statusColor;
-
-        $item('#textPrazo3').text       = t.prazoFormatado;
-        $item('#textLista3').text       = t.lista;
-        $item('#textResponsavel3').text = t.responsavel;
-
-        if (t.descricao) {
-          $item('#textDescricao3').text = t.descricao;
-        }
-        configurarToggleDescricao($item, '#textDescricao3', '#btnVerDescricao3', !!t.descricao);
-
-        $item('#btnAbrirTarefa3').link   = t.url;
-        $item('#btnAbrirTarefa3').target = '_blank';
-      });
-
-      $w('#repeaterConcluidas').data = concluidas;
-    } else {
-      ocultar('#containerConcluidas');
-    }
+    // Exibe todas as tarefas por padrão
+    aplicarFiltro('todas');
 
   } catch (err) {
     console.error('Erro na página Pauta:', err);
