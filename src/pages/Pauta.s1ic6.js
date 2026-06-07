@@ -28,15 +28,6 @@ const BTNS = {
   concluidas: '#btnFiltroConcluidas',
 };
 
-// IDs dos boxes filhos de #boxCard que precisam ter a borda resetada
-// para evitar o cascade do style.borderColor do pai.
-// Se adicionar novos Box dentro do card no editor, inclua o ID aqui.
-const CHILD_BOXES = [
-  '#box368', '#box370', '#box373', '#box385', '#box388',
-  '#box390', '#box391', '#box384', '#box387',
-  '#tagSiglaBox', '#textListaBox',
-];
-
 function aplicarFiltros() {
   Object.keys(BTNS).forEach(k => {
     try { $w(BTNS[k]).style.color = k === filtroTab ? '#002bff' : '#6b7280'; } catch (_) {}
@@ -127,25 +118,17 @@ $w.onReady(async () => {
       const isLate = t.atrasada;
       const gray   = '#9ca3af';
 
-      // --- Fundo do card ---
+      // --- Fundo + opacidade do card ---
       const bg = isLate ? '#fffbfb' : isApr ? '#fffdf5' : isCon ? '#f9fafb' : '#ffffff';
       try { $item('#boxCard').style.backgroundColor = bg; } catch (_) {}
       try { $item('#boxCard').opacity = isCon ? 0.6 : 1; } catch (_) {}
 
-      // --- Borda do card + reset nos filhos para cancelar cascade ---
+      // --- Borda do card por estado ---
+      // Pré-requisito no editor: #boxCard com espessura e cor ambos zerados nos filhos
       const borderColor = isLate ? '#f25252' : isApr ? '#f2b705' : isCon ? '#10b981' : '#e5e7eb';
       const borderWidth = (isLate || isApr) ? '2px' : '1.5px';
       try { $item('#boxCard').style.borderColor = borderColor; } catch (_) {}
       try { $item('#boxCard').style.borderWidth = borderWidth; } catch (_) {}
-      CHILD_BOXES.forEach(id => {
-        try { $item(id).style.borderColor = 'transparent'; } catch (_) {}
-      });
-
-      // --- Strip colorida no topo (#stripEstado) ---
-      // Indicador visual adicional — complementa a borda.
-      // Se preferir remover, basta apagar o #stripEstado do editor.
-      const stripColor = isLate ? '#f25252' : isApr ? '#f2b705' : isCon ? '#10b981' : 'transparent';
-      try { $item('#stripEstado').style.backgroundColor = stripColor; } catch (_) {}
 
       // --- Sigla: fundo colorido + texto branco ---
       $item('#tagSigla').text = t.sigla || '—';
