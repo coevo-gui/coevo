@@ -32,7 +32,7 @@ const SIGLAS = {
   'NANNAI':                 { id: 'a28c9219-ac4c-4a4c-8d92-b79761ae9691', color: '#e50000' },
   'ALIARZ':                 { id: 'ace318d3-e5dc-4583-8d2a-5c0f712f2c99', color: '#3082B7' },
   'SERRAS VERDES':          { id: 'bbc495b3-7b16-40ec-bf3d-13b4fd6d4291', color: '#FF7FAB' },
-  'SERRA DO CIPÓ':          { id: '9d242681-1e9e-464f-8324-5fcbd971140d', color: '#800000' },
+  'SERRA DO CIP\u00d3':          { id: '9d242681-1e9e-464f-8324-5fcbd971140d', color: '#800000' },
   'ROTA DO TRIANGULO':      { id: '4606f027-b54c-4108-bcd0-9233c5c62838', color: '#b5bcc2' },
   'CAMPO DAS VERTENTES':    { id: 'a743b794-c780-4d4b-adf2-3d3ff18659fd', color: '#f900ea' },
   'FECOMERCIO/MG':          { id: '703f3088-5a99-4bef-9d4e-9a3e6fb46907', color: '#667684' },
@@ -45,7 +45,7 @@ const SIGLAS = {
   'SECULT':                 { id: 'f023087a-0e31-4671-a1d5-5227abeb484a', color: '#7C4DFF' },
   'FLORIANI':               { id: '8e0ef711-e103-49b7-921c-f3edf185c673', color: '#bf55ec' },
   'PARQUE GAIA':            { id: '9daeb7e1-39ac-4da1-bc52-ba4e5f6f7ad4', color: '#E65100' },
-  'PARQUE ITAMARÉ':         { id: 'ba433e5c-4782-4217-ba6a-e6d77e133ea6', color: '#2ecd6f' },
+  'PARQUE ITAMAR\u00c9':         { id: 'ba433e5c-4782-4217-ba6a-e6d77e133ea6', color: '#2ecd6f' },
   'FDR':                    { id: 'eee9cc5a-bb71-4862-ac26-0bdb16ac7776', color: '#0079bf' },
   'CCP':                    { id: '4406c79e-e82f-485d-804d-1dc8e021f5f4', color: '#eb5a46' },
   'FLUXX':                  { id: '81ca2be1-3225-4369-bcc8-59db62837e77', color: '#51e898' },
@@ -115,15 +115,29 @@ function _normalize(tasks, now) {
       const concluida = t.status?.type === 'closed';
       const atrasada  = !concluida && diasDiff !== null && diasDiff < 0;
 
-      const clienteF   = (t.custom_fields || []).find(f => f.id === FIELD_CLI);
-      const siglaRaw   = clienteF?.value?.[0]?.label || '';
-      const sigla      = siglaRaw.toUpperCase();
+      // --- Extração de sigla: suporta todos os formatos que a API pode retornar ---
+      const clienteF = (t.custom_fields || []).find(f => f.id === FIELD_CLI);
+      let sigla = '';
+      if (clienteF?.value?.length > 0) {
+        const v = clienteF.value[0];
+        if (typeof v === 'string') {
+          // API retornou ID puro → busca reversa no mapa SIGLAS
+          sigla = Object.keys(SIGLAS).find(k => SIGLAS[k].id === v) || '';
+        } else if (v && typeof v === 'object') {
+          // API retornou objeto → tenta .label e depois .name
+          sigla = (v.label || v.name || '').toUpperCase();
+        }
+      }
+      // Fallback: extrai do nome no padrão "SIGLA | descrição"
+      if (!sigla) {
+        const m = (t.name || '').match(/^([A-Z]{2,6})\s*\|/);
+        if (m) sigla = m[1];
+      }
       const siglaColor = SIGLAS[sigla]?.color || '#6b7280';
 
       const assignee    = t.assignees?.[0];
       const responsavel = assignee ? (assignee.username || assignee.email || '—') : '—';
 
-      // status normalizado sem acentos — usado no filtro "em aprovação" client-side
       const statusNorm = (t.status?.status || '')
         .toLowerCase()
         .normalize('NFD')
@@ -149,7 +163,6 @@ function _normalize(tasks, now) {
         sigla,
         siglaColor,
         concluida,
-        // ponto roxo: atualizado nas últimas 48h
         recenteAtividade: t.date_updated ? (now - Number(t.date_updated)) < 2 * MS_DIA : false,
       };
     })
