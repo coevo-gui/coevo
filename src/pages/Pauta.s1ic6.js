@@ -28,37 +28,38 @@ const BTNS = {
   concluidas: '#btnFiltroConcluidas',
 };
 
+// IDs dos boxes filhos de #boxCard que precisam ter a borda resetada
+// para evitar o cascade do style.borderColor do pai.
+// Se adicionar novos Box dentro do card no editor, inclua o ID aqui.
+const CHILD_BOXES = [
+  '#box368', '#box370', '#box373', '#box385', '#box388',
+  '#box390', '#box391', '#box384', '#box387',
+  '#tagSiglaBox', '#textListaBox',
+];
+
 function aplicarFiltros() {
-  // Indica tab ativa via cor
   Object.keys(BTNS).forEach(k => {
     try { $w(BTNS[k]).style.color = k === filtroTab ? '#002bff' : '#6b7280'; } catch (_) {}
   });
-
   let r = todasTarefas.filter(FILTROS[filtroTab]);
-
   if (buscaTexto) {
     const b = buscaTexto.toLowerCase();
     r = r.filter(t => t.nome.toLowerCase().includes(b));
   }
-  if (filtroSigla)  r = r.filter(t => t.sigla === filtroSigla);
-  if (filtroResp)   r = r.filter(t => t.responsavel === filtroResp);
-
+  if (filtroSigla) r = r.filter(t => t.sigla === filtroSigla);
+  if (filtroResp)  r = r.filter(t => t.responsavel === filtroResp);
   $w('#textPautaTotal').text = `${r.length} tarefa${r.length !== 1 ? 's' : ''}`;
   $w('#repeaterPauta').data = r;
 }
 
-function setTab(tipo) {
-  filtroTab = tipo;
-  aplicarFiltros();
-}
+function setTab(tipo) { filtroTab = tipo; aplicarFiltros(); }
 
 $w.onReady(async () => {
   try {
     const member = await currentMember.getMember();
     if (!member) { wixLocation.to('/login'); return; }
 
-    const acessoResult = await wixData
-      .query('acessoUsuario').eq('memberId', member._id).find();
+    const acessoResult = await wixData.query('acessoUsuario').eq('memberId', member._id).find();
     if (!acessoResult.items.length) return;
 
     const acesso = acessoResult.items[0];
@@ -80,27 +81,23 @@ $w.onReady(async () => {
 
     todasTarefas = await getTarefasCliente(siglas);
 
-    // ---------- Labels dos chips ----------
     $w('#btnFiltroTodas').label      = `Todas (${todasTarefas.length})`;
     $w('#btnFiltroAtrasadas').label  = `Atrasadas (${todasTarefas.filter(FILTROS.atrasadas).length})`;
     $w('#btnFiltroAprovacao').label  = `Em aprovação (${todasTarefas.filter(FILTROS.aprovacao).length})`;
     $w('#btnFiltroSemana').label     = `Esta semana (${todasTarefas.filter(FILTROS.semana).length})`;
     $w('#btnFiltroConcluidas').label = `Concluídas (${todasTarefas.filter(FILTROS.concluidas).length})`;
 
-    // ---------- Clicks dos chips ----------
     $w('#btnFiltroTodas').onClick(()      => setTab('todas'));
     $w('#btnFiltroAtrasadas').onClick(()  => setTab('atrasadas'));
     $w('#btnFiltroAprovacao').onClick(()  => setTab('aprovacao'));
     $w('#btnFiltroSemana').onClick(()     => setTab('semana'));
     $w('#btnFiltroConcluidas').onClick(() => setTab('concluidas'));
 
-    // ---------- Busca por texto ----------
     $w('#inputBusca').onInput(e => {
       buscaTexto = (e.target.value || '').trim();
       aplicarFiltros();
     });
 
-    // ---------- Dropdown de cliente ----------
     const siglasList = [...new Set(todasTarefas.map(t => t.sigla).filter(Boolean))].sort();
     if (siglasList.length > 1) {
       $w('#dropdownCliente').options = [
@@ -108,15 +105,11 @@ $w.onReady(async () => {
         ...siglasList.map(s => ({ label: s, value: s })),
       ];
       try { $w('#dropdownCliente').expand(); } catch (_) {}
-      $w('#dropdownCliente').onChange(e => {
-        filtroSigla = e.target.value || '';
-        aplicarFiltros();
-      });
+      $w('#dropdownCliente').onChange(e => { filtroSigla = e.target.value || ''; aplicarFiltros(); });
     } else {
       try { $w('#dropdownCliente').collapse(); } catch (_) {}
     }
 
-    // ---------- Dropdown de responsável ----------
     const respList = [...new Set(
       todasTarefas.map(t => t.responsavel).filter(r => r && r !== '—')
     )].sort();
@@ -125,29 +118,34 @@ $w.onReady(async () => {
         { label: 'Todos os responsáveis', value: '' },
         ...respList.map(r => ({ label: r, value: r })),
       ];
-      $w('#dropdownResponsavel').onChange(e => {
-        filtroResp = e.target.value || '';
-        aplicarFiltros();
-      });
+      $w('#dropdownResponsavel').onChange(e => { filtroResp = e.target.value || ''; aplicarFiltros(); });
     }
 
-    // ---------- Repeater ----------
     $w('#repeaterPauta').onItemReady(($item, t) => {
-      const isOk   = !t.atrasada && !t.concluida && !t.statusNorm.includes('aprova');
       const isCon  = t.concluida;
       const isApr  = !isCon && t.statusNorm.includes('aprova');
       const isLate = t.atrasada;
       const gray   = '#9ca3af';
 
-      // --- Estado do card: fundo + borda ---
+      // --- Fundo do card ---
       const bg = isLate ? '#fffbfb' : isApr ? '#fffdf5' : isCon ? '#f9fafb' : '#ffffff';
       try { $item('#boxCard').style.backgroundColor = bg; } catch (_) {}
       try { $item('#boxCard').opacity = isCon ? 0.6 : 1; } catch (_) {}
 
-      const borderColor = isLate ? '#f25252' : isApr ? '#f2b705' : isCon ? '#d1fae5' : '#e5e7eb';
+      // --- Borda do card + reset nos filhos para cancelar cascade ---
+      const borderColor = isLate ? '#f25252' : isApr ? '#f2b705' : isCon ? '#10b981' : '#e5e7eb';
       const borderWidth = (isLate || isApr) ? '2px' : '1.5px';
       try { $item('#boxCard').style.borderColor = borderColor; } catch (_) {}
       try { $item('#boxCard').style.borderWidth = borderWidth; } catch (_) {}
+      CHILD_BOXES.forEach(id => {
+        try { $item(id).style.borderColor = 'transparent'; } catch (_) {}
+      });
+
+      // --- Strip colorida no topo (#stripEstado) ---
+      // Indicador visual adicional — complementa a borda.
+      // Se preferir remover, basta apagar o #stripEstado do editor.
+      const stripColor = isLate ? '#f25252' : isApr ? '#f2b705' : isCon ? '#10b981' : 'transparent';
+      try { $item('#stripEstado').style.backgroundColor = stripColor; } catch (_) {}
 
       // --- Sigla: fundo colorido + texto branco ---
       $item('#tagSigla').text = t.sigla || '—';
@@ -183,10 +181,8 @@ $w.onReady(async () => {
       // --- Prazo ---
       $item('#textPrazo').text = t.prazoFormatado;
 
-      // --- Lista: cor da pill = cor do cliente (ou azul para coevo.pauta) ---
-      const listaColor = isCon ? gray
-        : t.lista === 'coevo.pauta' ? '#002bff'
-        : t.siglaColor;
+      // --- Lista ---
+      const listaColor = isCon ? gray : t.lista === 'coevo.pauta' ? '#002bff' : t.siglaColor;
       $item('#textLista').text = t.lista;
       $item('#textLista').style.color = listaColor;
       try { $item('#textListaBox').style.backgroundColor = listaColor + '22'; } catch (_) {}
@@ -194,10 +190,8 @@ $w.onReady(async () => {
       // --- Responsável ---
       $item('#textResponsavel').text = t.responsavel;
 
-      // --- Ponto de atividade recente ---
-      try {
-        t.recenteAtividade ? $item('#dotAtividade').expand() : $item('#dotAtividade').collapse();
-      } catch (_) {}
+      // --- Atividade recente ---
+      try { t.recenteAtividade ? $item('#dotAtividade').expand() : $item('#dotAtividade').collapse(); } catch (_) {}
 
       // --- Descrição + toggle ---
       if (t.descricao) {
