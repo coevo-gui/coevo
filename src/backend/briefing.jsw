@@ -14,7 +14,6 @@ const EQUIPE = [
 // ─── Wiki: busca wikiUrl do CMS e lê o conteúdo da página ─────────────────
 async function getClientWikiContent(sigla) {
   try {
-    // 1. Pega a URL da wiki diretamente do cadastro do subclient no CMS
     const scResult = await wixData
       .query('subclientes')
       .eq('sigla', sigla?.toUpperCase())
@@ -26,7 +25,7 @@ async function getClientWikiContent(sigla) {
       return '';
     }
 
-    // 2. Extrai o page ID da URL do ClickUp
+    // Extrai o page ID da URL do ClickUp
     // Formato: https://app.clickup.com/3136006/v/dc/2zpg6-1403/2zpg6-XXXX
     const pageIdMatch = wikiUrl.match(/\/([^/]+)$/);
     const pageId = pageIdMatch?.[1];
@@ -35,20 +34,38 @@ async function getClientWikiContent(sigla) {
       return '';
     }
 
-    // 3. Busca o conteúdo via API do ClickUp
+    console.log(`[Wiki] ${sigla}: pageId=${pageId}, wikiUrl=${wikiUrl}`);
+
     const token = await getSecret('CLICKUP_TOKEN');
 
-    // Tenta endpoint de lista com page_ids (retorna conteúdo)
+    // Endpoint de lista com page_ids
     const url = `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`;
+    console.log(`[Wiki] ${sigla}: GET ${url}`);
+
     const res = await fetch(url, { headers: { Authorization: token } });
+    console.log(`[Wiki] ${sigla}: HTTP ${res.status}`);
 
     if (!res.ok) {
-      console.error(`[Wiki] ${sigla}: HTTP ${res.status}`);
+      const errText = await res.text();
+      console.error(`[Wiki] ${sigla}: erro ${res.status} — ${errText.slice(0, 200)}`);
       return '';
     }
 
     const data = await res.json();
-    const pages = data.pages || (Array.isArray(data) ? data : [data]);
+    // Loga a estrutura da resposta para debug
+    const keys = Object.keys(data);
+    const firstKey = keys[0];
+    const firstVal = data[firstKey];
+    console.log(`[Wiki] ${sigla}: resposta keys=${JSON.stringify(keys)}, tipo[0]=${typeof firstVal}, isArray=${Array.isArray(firstVal)}`);
+
+    if (Array.isArray(firstVal) && firstVal.length > 0) {
+      console.log(`[Wiki] ${sigla}: primeiro item keys=${JSON.stringify(Object.keys(firstVal[0]))}`);
+      console.log(`[Wiki] ${sigla}: content preview=${String(firstVal[0]?.content || '').slice(0,100)}`);
+    } else if (typeof data === 'object') {
+      console.log(`[Wiki] ${sigla}: data preview=${JSON.stringify(data).slice(0,300)}`);
+    }
+
+    const pages = data.pages || data.data || (Array.isArray(data) ? data : [data]);
     const page = pages.find(p => p.id === pageId) || pages[0];
     const content = (page?.content || '').slice(0, 4000);
     console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
@@ -167,15 +184,15 @@ export async function getSubclientes(memberId) {
 export async function saveBriefingLog(p) {
   try {
     await wixData.insert('briefingLogs', {
-      memberId:       p.memberId      || '',
-      clienteSigla:   p.clienteSigla  || '',
-      clienteNome:    p.clienteNome   || '',
-      taskId:         p.taskId        || '',
-      taskUrl:        p.taskUrl       || '',
-      categoria:      p.categoria     || '',
-      resumo:         p.resumo        || '',
-      analiseIA:      p.analiseIA     || '',
-      conversa:       p.conversa      || '',
+      memberId:        p.memberId       || '',
+      clienteSigla:    p.clienteSigla   || '',
+      clienteNome:     p.clienteNome    || '',
+      taskId:          p.taskId         || '',
+      taskUrl:         p.taskUrl        || '',
+      categoria:       p.categoria      || '',
+      resumo:          p.resumo         || '',
+      analiseIA:       p.analiseIA      || '',
+      conversa:        p.conversa       || '',
       solicitanteNome: p.solicitanteNome || '',
     }, { suppressAuth: true });
     return { ok: true };
