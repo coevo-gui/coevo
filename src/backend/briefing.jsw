@@ -3,7 +3,7 @@ import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
 // Mapa sigla → page ID na wiki do ClickUp (doc 2zpg6-1403 > coevo.clientes)
-// VDS, VAU, QDV, SIH, CDC, GUV, HDF não têm página na wiki ainda
+// VDS, VAU, QDV, SIH, CDC, HDF não têm página na wiki ainda
 const WIKI_PAGES = {
   JCB:  '2zpg6-9173',
   CJOI: '2zpg6-8793',
@@ -32,16 +32,34 @@ async function getClientWikiContent(sigla) {
   }
   try {
     const token = await getSecret('CLICKUP_TOKEN');
-    const res = await fetch(
-      `${CU_BASE}/doc/${WIKI_DOC_ID}/page/${pageId}?content_format=text/md`,
-      { headers: { Authorization: token } }
-    );
+
+    // A API v2 do ClickUp retorna content vazio com /page/{id}?content_format=text/md
+    // O endpoint correto é listar páginas do doc com conteúdo incluso via page_ids
+    // Usando o endpoint de lista com filtro por page_id e content_format URL-encoded
+    const url = `${CU_BASE}/doc/${WIKI_DOC_ID}/page?` +
+      `page_ids[]=${pageId}&content_format=text%2Fmd`;
+
+    const res = await fetch(url, { headers: { Authorization: token } });
+
     if (!res.ok) {
       console.error(`[Wiki] HTTP ${res.status} para ${sigla} (pageId: ${pageId})`);
-      return '';
+      // Fallback: tenta endpoint singular com encoding alternativo
+      const res2 = await fetch(
+        `${CU_BASE}/doc/${WIKI_DOC_ID}/page/${pageId}`,
+        { headers: { Authorization: token, 'Content-Type': 'application/json' } }
+      );
+      if (!res2.ok) return '';
+      const d2 = await res2.json();
+      const c2 = (d2.content || d2.pages?.[0]?.content || '').slice(0, 4000);
+      console.log(`[Wiki] ${sigla} (fallback): ${c2.length} chars`);
+      return c2;
     }
+
     const data = await res.json();
-    const content = (data.content || '').slice(0, 3000);
+    // Resposta pode ser { pages: [...] } ou array direto
+    const pages = data.pages || (Array.isArray(data) ? data : [data]);
+    const page = pages.find(p => p.id === pageId) || pages[0];
+    const content = (page?.content || '').slice(0, 4000);
     console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
     return content;
   } catch (err) {
@@ -107,9 +125,6 @@ export async function getSubclientes(memberId) {
   } catch (err) { return { error: err.message }; }
 }
 
-/**
- * Envia os dois emails transacionais via Brevo após criação da task.
- */
 export async function sendBriefingEmails(p) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
