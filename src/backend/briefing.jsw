@@ -2,10 +2,18 @@
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
+// Mapa sigla → page ID na wiki do ClickUp (doc 2zpg6-1403 > coevo.clientes)
+// VDS, VAU, QDV, SIH, CDC, GUV, HDF não têm página na wiki ainda
 const WIKI_PAGES = {
-  CJOI: '2zpg6-8793', AHI: '2zpg6-1023', WGA: '2zpg6-9153',
-  BRI:  '2zpg6-7793', SAG: '2zpg6-7833', DYC: '2zpg6-5493',
-  HCV:  '2zpg6-8153', JCB: '2zpg6-9173',
+  JCB:  '2zpg6-9173',
+  CJOI: '2zpg6-8793',
+  AHI:  '2zpg6-1023',
+  WGA:  '2zpg6-9153',
+  BRI:  '2zpg6-7793',
+  SAG:  '2zpg6-7833',
+  DYC:  '2zpg6-5493',
+  HCV:  '2zpg6-8153',
+  GUV:  '2zpg6-9093',
 };
 const WIKI_DOC_ID = '2zpg6-1403';
 const CU_BASE = 'https://api.clickup.com/api/v2';
@@ -18,17 +26,28 @@ const EQUIPE = [
 
 async function getClientWikiContent(sigla) {
   const pageId = WIKI_PAGES[sigla?.toUpperCase()];
-  if (!pageId) return '';
+  if (!pageId) {
+    console.log(`[Wiki] Sem página mapeada para ${sigla} — contexto não injetado`);
+    return '';
+  }
   try {
     const token = await getSecret('CLICKUP_TOKEN');
     const res = await fetch(
       `${CU_BASE}/doc/${WIKI_DOC_ID}/page/${pageId}?content_format=text/md`,
       { headers: { Authorization: token } }
     );
-    if (!res.ok) return '';
+    if (!res.ok) {
+      console.error(`[Wiki] HTTP ${res.status} para ${sigla} (pageId: ${pageId})`);
+      return '';
+    }
     const data = await res.json();
-    return (data.content || '').slice(0, 3000);
-  } catch { return ''; }
+    const content = (data.content || '').slice(0, 3000);
+    console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
+    return content;
+  } catch (err) {
+    console.error(`[Wiki] Erro ao buscar ${sigla}:`, err.message);
+    return '';
+  }
 }
 
 export async function callAI(payload) {
@@ -82,7 +101,6 @@ export async function getSubclientes(memberId) {
       items = r.items;
     } else if (acesso.nivel === 'cliente_unidade') {
       const refs = await wixData.queryReferenced('acessoUsuario', acesso._id, 'subclientes', { suppressAuth: true });
-      // queryReferenced não suporta filtros adicionais — filtra em memória
       items = refs.items.filter(i => i.status === 'ativo');
     }
     return { items: items.map(i => ({ sigla: i.sigla || '', nome: i.nome || i.sigla || '' })) };
@@ -91,32 +109,24 @@ export async function getSubclientes(memberId) {
 
 /**
  * Envia os dois emails transacionais via Brevo após criação da task.
- * @param {object} p — { taskName, taskUrl, clienteNome, clienteSigla,
- *                       categoria, prazo, campos, firstAiReply,
- *                       solicitanteNome, solicitanteEmail }
  */
 export async function sendBriefingEmails(p) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
-
     const headers = {
       'Content-Type': 'application/json',
       'api-key': brevoKey,
     };
-
     const prazoFmt = p.prazo
       ? new Date(p.prazo + 'T12:00:00').toLocaleDateString('pt-BR')
       : '—';
-
     const camposHtml = (p.campos || [])
       .filter(c => c.value)
       .map(c => `<tr>
         <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;white-space:nowrap;vertical-align:top">${c.label}</td>
         <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${c.value}</td>
-      </tr>`)
-      .join('');
+      </tr>`).join('');
 
-    // ── EMAIL INTERNO (equipe) ────────────────────────────────────────────
     const htmlInterno = `
 <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Arial,sans-serif">
@@ -130,39 +140,19 @@ export async function sendBriefingEmails(p) {
     <table cellpadding="0" cellspacing="0" width="100%" style="background:#f7f7f5;border-radius:8px;margin-bottom:24px">
       <tr><td style="padding:16px 20px">
         <table cellpadding="0" cellspacing="0" width="100%">
-          <tr>
-            <td style="padding:6px 0;font-size:13px;color:#555;width:140px">Cliente</td>
-            <td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.clienteNome} <span style="color:#999;font-weight:400">(${p.clienteSigla})</span></td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;font-size:13px;color:#555">Solicitação</td>
-            <td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.taskName}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;font-size:13px;color:#555">Categoria</td>
-            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.categoria}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;font-size:13px;color:#555">Prazo sugerido</td>
-            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${prazoFmt}</td>
-          </tr>
-          <tr>
-            <td style="padding:6px 0;font-size:13px;color:#555">Solicitante</td>
-            <td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.solicitanteNome} &lt;${p.solicitanteEmail}&gt;</td>
-          </tr>
+          <tr><td style="padding:6px 0;font-size:13px;color:#555;width:140px">Cliente</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.clienteNome} <span style="color:#999;font-weight:400">(${p.clienteSigla})</span></td></tr>
+          <tr><td style="padding:6px 0;font-size:13px;color:#555">Solicitação</td><td style="padding:6px 0;font-size:13px;font-weight:600;color:#1a1a1a">${p.taskName}</td></tr>
+          <tr><td style="padding:6px 0;font-size:13px;color:#555">Categoria</td><td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.categoria}</td></tr>
+          <tr><td style="padding:6px 0;font-size:13px;color:#555">Prazo sugerido</td><td style="padding:6px 0;font-size:13px;color:#1a1a1a">${prazoFmt}</td></tr>
+          <tr><td style="padding:6px 0;font-size:13px;color:#555">Solicitante</td><td style="padding:6px 0;font-size:13px;color:#1a1a1a">${p.solicitanteNome} &lt;${p.solicitanteEmail}&gt;</td></tr>
         </table>
       </td></tr>
     </table>
     <a href="${p.taskUrl}" style="display:inline-block;background:#002bff;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:8px">Abrir no ClickUp →</a>
   </td></tr>
-  <tr><td style="padding:16px 32px;border-top:1px solid #eee">
-    <p style="margin:0;font-size:11px;color:#999">Enviado automaticamente pelo Smart Briefing — painel Coevo</p>
-  </td></tr>
-</table>
-</td></tr></table>
-</body></html>`;
+  <tr><td style="padding:16px 32px;border-top:1px solid #eee"><p style="margin:0;font-size:11px;color:#999">Enviado automaticamente pelo Smart Briefing — painel Coevo</p></td></tr>
+</table></td></tr></table></body></html>`;
 
-    // ── EMAIL EXTERNO (cliente/solicitante) ───────────────────────────────
     const htmlExterno = `
 <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"></head>
 <body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Arial,sans-serif">
@@ -176,18 +166,9 @@ export async function sendBriefingEmails(p) {
     <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6">Olá, <strong>${p.solicitanteNome}</strong>! Recebemos seu briefing e a equipe Coevo já foi notificada. Abaixo está o resumo do que foi enviado.</p>
     <h2 style="margin:0 0 12px;font-size:15px;font-weight:700;color:#1a1a1a;border-bottom:2px solid #002bff;padding-bottom:8px">${p.taskName}</h2>
     <table cellpadding="0" cellspacing="0" width="100%" style="margin-bottom:24px">
-      <tr>
-        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;width:180px;vertical-align:top">Unidade</td>
-        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.clienteNome}</td>
-      </tr>
-      <tr style="background:#f7f7f5">
-        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Categoria</td>
-        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.categoria}</td>
-      </tr>
-      <tr>
-        <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Prazo sugerido</td>
-        <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${prazoFmt}</td>
-      </tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;width:180px;vertical-align:top">Unidade</td><td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.clienteNome}</td></tr>
+      <tr style="background:#f7f7f5"><td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Categoria</td><td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${p.categoria}</td></tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;vertical-align:top">Prazo sugerido</td><td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${prazoFmt}</td></tr>
       ${camposHtml}
     </table>
     ${p.firstAiReply ? `
@@ -198,20 +179,14 @@ export async function sendBriefingEmails(p) {
     <p style="margin:0 0 24px;font-size:13px;color:#555;line-height:1.6">Em breve a equipe entrará em contato pelo mesmo canal para dar continuidade. Se tiver qualquer dúvida, responda este email.</p>
     <a href="${p.taskUrl}" style="display:inline-block;background:#002bff;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 24px;border-radius:8px">Ver meu briefing no ClickUp →</a>
   </td></tr>
-  <tr><td style="padding:16px 32px;border-top:1px solid #eee;text-align:center">
-    <p style="margin:0;font-size:11px;color:#999">coevo.co — conectando vidas &amp; lugares</p>
-  </td></tr>
-</table>
-</td></tr></table>
-</body></html>`;
+  <tr><td style="padding:16px 32px;border-top:1px solid #eee;text-align:center"><p style="margin:0;font-size:11px;color:#999">coevo.co — conectando vidas &amp; lugares</p></td></tr>
+</table></td></tr></table></body></html>`;
 
     const [resInterno, resExterno] = await Promise.all([
       fetch(`${BREVO_BASE}/smtp/email`, {
-        method: 'POST',
-        headers,
+        method: 'POST', headers,
         body: JSON.stringify({
-          sender: SENDER,
-          to: EQUIPE,
+          sender: SENDER, to: EQUIPE,
           replyTo: { email: p.solicitanteEmail, name: p.solicitanteNome },
           subject: `[Briefing] ${p.taskName} — ${p.clienteNome}`,
           htmlContent: htmlInterno,
@@ -219,8 +194,7 @@ export async function sendBriefingEmails(p) {
         }),
       }),
       fetch(`${BREVO_BASE}/smtp/email`, {
-        method: 'POST',
-        headers,
+        method: 'POST', headers,
         body: JSON.stringify({
           sender: SENDER,
           to: [{ name: p.solicitanteNome, email: p.solicitanteEmail }],
@@ -234,12 +208,9 @@ export async function sendBriefingEmails(p) {
 
     const dInterno = await resInterno.json();
     const dExterno = await resExterno.json();
-
     if (!resInterno.ok || !resExterno.ok) {
       return { error: `Brevo: interno=${JSON.stringify(dInterno)} externo=${JSON.stringify(dExterno)}` };
     }
     return { ok: true };
-  } catch (err) {
-    return { error: err.message };
-  }
+  } catch (err) { return { error: err.message }; }
 }
