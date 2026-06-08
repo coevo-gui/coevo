@@ -3,7 +3,13 @@
 
 import { currentMember } from 'wix-members';
 import wixLocation from 'wix-location';
-import { callAI, getSubclientes, sendBriefingEmails, saveBriefingLog } from 'backend/briefing.jsw';
+import {
+  callAI,
+  getSubclientes,
+  sendBriefingEmails,
+  createBriefingLog,
+  updateBriefingLog,
+} from 'backend/briefing.jsw';
 
 $w.onReady(async () => {
   const member = await currentMember.getMember({ fieldsets: ['FULL'] });
@@ -30,20 +36,25 @@ $w.onReady(async () => {
       reply(result);
     }
 
+    if (type === 'CREATE_LOG') {
+      const result = await createBriefingLog({
+        ...payload,
+        memberId: member._id,
+        solicitanteNome: memberName,
+      });
+      reply(result);
+    }
+
+    if (type === 'UPDATE_LOG') {
+      const result = await updateBriefingLog(payload);
+      reply(result);
+    }
+
     if (type === 'SEND_EMAILS') {
       const result = await sendBriefingEmails({
         ...payload,
         solicitanteNome: memberName,
         solicitanteEmail: memberEmail,
-      });
-      reply(result);
-    }
-
-    if (type === 'SAVE_LOG') {
-      const result = await saveBriefingLog({
-        ...payload,
-        memberId: member._id,
-        solicitanteNome: memberName,
       });
       reply(result);
     }

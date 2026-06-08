@@ -11,7 +11,7 @@ const EQUIPE = [
   { name: 'Bruno', email: 'bruno@coevo.co' },
 ];
 
-// ─── Wiki: busca wikiUrl do CMS e lê o conteúdo da página ─────────────────
+// ─── Wiki ─────────────────────────────────────────────────────────────────
 async function getClientWikiContent(sigla) {
   try {
     const scResult = await wixData
@@ -20,58 +20,45 @@ async function getClientWikiContent(sigla) {
       .find({ suppressAuth: true });
 
     const wikiUrl = scResult.items?.[0]?.wikiUrl;
-    if (!wikiUrl) {
-      console.log(`[Wiki] ${sigla}: sem wikiUrl no cadastro`);
-      return '';
-    }
+    if (!wikiUrl) { console.log(`[Wiki] ${sigla}: sem wikiUrl`); return ''; }
 
-    // Extrai o page ID da URL do ClickUp
-    // Formato: https://app.clickup.com/3136006/v/dc/2zpg6-1403/2zpg6-XXXX
     const pageIdMatch = wikiUrl.match(/\/([^/]+)$/);
     const pageId = pageIdMatch?.[1];
-    if (!pageId) {
-      console.log(`[Wiki] ${sigla}: não foi possível extrair pageId de ${wikiUrl}`);
-      return '';
-    }
+    if (!pageId) { console.log(`[Wiki] ${sigla}: pageId não extraído`); return ''; }
 
     const token = await getSecret('CLICKUP_TOKEN');
-
-    // Endpoint singular com content_format — retorna o campo "content" completo
-    const url = `${CU_BASE}/doc/${CU_WIKI_DOC}/page/${pageId}?content_format=text/md`;
-    const res = await fetch(url, {
-      headers: {
-        'Authorization': token,
-        'Content-Type': 'application/json',
-      },
-    });
+    const res = await fetch(
+      `${CU_BASE}/doc/${CU_WIKI_DOC}/page/${pageId}?content_format=text/md`,
+      { headers: { 'Authorization': token, 'Content-Type': 'application/json' } }
+    );
 
     if (!res.ok) {
       console.error(`[Wiki] ${sigla}: HTTP ${res.status}`);
-      // Fallback: tenta endpoint de lista e usa text_content
-      const url2 = `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`;
-      const res2 = await fetch(url2, { headers: { Authorization: token } });
+      // Fallback: endpoint de lista
+      const res2 = await fetch(
+        `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`,
+        { headers: { Authorization: token } }
+      );
       if (!res2.ok) return '';
       const d2 = await res2.json();
-      const pages2 = d2.pages || [];
-      const page2 = pages2.find(p => p.id === pageId) || pages2[0];
-      const c2 = (page2?.text_content || page2?.content || '').slice(0, 4000);
-      console.log(`[Wiki] ${sigla} (fallback lista): ${c2.length} chars`);
+      const p2 = (d2.pages || []).find(p => p.id === pageId) || (d2.pages || [])[0];
+      const c2 = (p2?.text_content || p2?.content || '').slice(0, 4000);
+      console.log(`[Wiki] ${sigla} (fallback): ${c2.length} chars`);
       return c2;
     }
 
     const data = await res.json();
-    // Endpoint singular retorna o objeto da página diretamente
     const page = data.page || data;
     const content = (page?.content || page?.text_content || '').slice(0, 4000);
     console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
     return content;
   } catch (err) {
-    console.error(`[Wiki] Erro para ${sigla}:`, err.message);
+    console.error(`[Wiki] Erro ${sigla}:`, err.message);
     return '';
   }
 }
 
-// ─── Histórico: busca últimos briefings do cliente no CMS ─────────────────
+// ─── Histórico ────────────────────────────────────────────────────────────
 async function getClientHistory(sigla, limit = 3) {
   try {
     const result = await wixData
@@ -83,18 +70,16 @@ async function getClientHistory(sigla, limit = 3) {
 
     if (!result.items.length) return '';
 
-    const lines = result.items.map((item, i) => {
+    return result.items.map((item, i) => {
       const data = new Date(item._createdDate).toLocaleDateString('pt-BR');
       return `Briefing ${i + 1} (${data})\n` +
         `  Solicitante: ${item.solicitanteNome || '—'}\n` +
         `  Categoria: ${item.categoria || '—'}\n` +
         `  Resumo: ${(item.resumo || '').slice(0, 300)}\n` +
         `  Análise do Coevito: ${(item.analiseIA || '').slice(0, 200)}`;
-    });
-
-    return lines.join('\n\n');
+    }).join('\n\n');
   } catch (err) {
-    console.error(`[Histórico] Erro para ${sigla}:`, err.message);
+    console.error(`[Histórico] Erro ${sigla}:`, err.message);
     return '';
   }
 }
@@ -110,37 +95,24 @@ export async function callAI(payload) {
         getClientWikiContent(payload.clientSigla),
         getClientHistory(payload.clientSigla),
       ]);
-
-      if (wikiContent) {
-        systemPrompt +=
-          `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
-      }
-
-      if (history) {
-        systemPrompt +=
-          `\n\n---\nHISTÓRICO DE BRIEFINGS ANTERIORES deste cliente:\n${history}\n\n` +
+      if (wikiContent)
+        systemPrompt += `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+      if (history)
+        systemPrompt += `\n\n---\nHISTÓRICO DE BRIEFINGS ANTERIORES deste cliente:\n${history}\n\n` +
           `Use esse histórico para personalizar sua análise. Mencione explicitamente ` +
           `quando algo foi solicitado antes ou quando há padrões recorrentes.\n---`;
-      }
     }
-
-    const body = {
-      model: payload.model || 'claude-haiku-4-5-20251001',
-      max_tokens: payload.max_tokens || 1000,
-      system: systemPrompt,
-      messages: payload.messages,
-    };
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: payload.model || 'claude-haiku-4-5-20251001',
+        max_tokens: payload.max_tokens || 1000,
+        system: systemPrompt,
+        messages: payload.messages,
+      }),
     });
-
     const data = await response.json();
     if (!response.ok) return { error: data.error?.message || `HTTP ${response.status}` };
     return { text: data.content?.[0]?.text || '' };
@@ -175,24 +147,46 @@ export async function getSubclientes(memberId) {
   } catch (err) { return { error: err.message }; }
 }
 
-// ─── saveBriefingLog ───────────────────────────────────────────────────────
-export async function saveBriefingLog(p) {
+// ─── createBriefingLog — cria o registro inicial ao entrar no chat ────────
+export async function createBriefingLog(p) {
   try {
-    await wixData.insert('briefingLogs', {
-      memberId:        p.memberId       || '',
-      clienteSigla:    p.clienteSigla   || '',
-      clienteNome:     p.clienteNome    || '',
-      taskId:          p.taskId         || '',
-      taskUrl:         p.taskUrl        || '',
-      categoria:       p.categoria      || '',
-      resumo:          p.resumo         || '',
-      analiseIA:       p.analiseIA      || '',
-      conversa:        p.conversa       || '',
-      solicitanteNome: p.solicitanteNome || '',
+    const inserted = await wixData.insert('briefingLogs', {
+      memberId:        p.memberId        || '',
+      clienteSigla:    p.clienteSigla    || '',
+      clienteNome:     p.clienteNome     || '',
+      categoria:       p.categoria       || '',
+      resumo:          p.resumo          || '',
+      solicitanteNome: p.solicitanteNome  || '',
+      // Campos que ainda não existem neste momento
+      taskId:   '',
+      taskUrl:  '',
+      analiseIA: '',
+      conversa:  '',
+    }, { suppressAuth: true });
+    return { ok: true, logId: inserted._id };
+  } catch (err) {
+    console.error('[BriefingLog] Erro ao criar:', err.message);
+    return { error: err.message };
+  }
+}
+
+// ─── updateBriefingLog — atualiza o registro após envio ao ClickUp ────────
+export async function updateBriefingLog(p) {
+  try {
+    if (!p.logId) return { error: 'logId obrigatório' };
+    // wixData.update exige o _id e todos os campos presentes no item
+    const existing = await wixData.get('briefingLogs', p.logId, { suppressAuth: true });
+    if (!existing) return { error: 'registro não encontrado' };
+    await wixData.update('briefingLogs', {
+      ...existing,
+      taskId:    p.taskId    || existing.taskId,
+      taskUrl:   p.taskUrl   || existing.taskUrl,
+      analiseIA: p.analiseIA || existing.analiseIA,
+      conversa:  p.conversa  || existing.conversa,
     }, { suppressAuth: true });
     return { ok: true };
   } catch (err) {
-    console.error('[BriefingLog] Erro ao salvar:', err.message);
+    console.error('[BriefingLog] Erro ao atualizar:', err.message);
     return { error: err.message };
   }
 }
