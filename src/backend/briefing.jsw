@@ -35,19 +35,34 @@ async function getClientWikiContent(sigla) {
     }
 
     const token = await getSecret('CLICKUP_TOKEN');
-    const url = `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`;
-    const res = await fetch(url, { headers: { Authorization: token } });
+
+    // Endpoint singular com content_format — retorna o campo "content" completo
+    const url = `${CU_BASE}/doc/${CU_WIKI_DOC}/page/${pageId}?content_format=text/md`;
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json',
+      },
+    });
 
     if (!res.ok) {
       console.error(`[Wiki] ${sigla}: HTTP ${res.status}`);
-      return '';
+      // Fallback: tenta endpoint de lista e usa text_content
+      const url2 = `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`;
+      const res2 = await fetch(url2, { headers: { Authorization: token } });
+      if (!res2.ok) return '';
+      const d2 = await res2.json();
+      const pages2 = d2.pages || [];
+      const page2 = pages2.find(p => p.id === pageId) || pages2[0];
+      const c2 = (page2?.text_content || page2?.content || '').slice(0, 4000);
+      console.log(`[Wiki] ${sigla} (fallback lista): ${c2.length} chars`);
+      return c2;
     }
 
     const data = await res.json();
-    const pages = data.pages || (Array.isArray(data) ? data : [data]);
-    const page = pages.find(p => p.id === pageId) || pages[0];
-    // A API retorna o conteúdo em text_content (não em content)
-    const content = (page?.text_content || page?.content || '').slice(0, 4000);
+    // Endpoint singular retorna o objeto da página diretamente
+    const page = data.page || data;
+    const content = (page?.content || page?.text_content || '').slice(0, 4000);
     console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
     return content;
   } catch (err) {
