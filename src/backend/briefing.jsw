@@ -2,21 +2,8 @@
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
-// Mapa sigla → page ID na wiki do ClickUp (doc 2zpg6-1403 > coevo.clientes)
-// VDS, VAU, QDV, SIH, CDC, HDF não têm página na wiki ainda
-const WIKI_PAGES = {
-  JCB:  '2zpg6-9173',
-  CJOI: '2zpg6-8793',
-  AHI:  '2zpg6-1023',
-  WGA:  '2zpg6-9153',
-  BRI:  '2zpg6-7793',
-  SAG:  '2zpg6-7833',
-  DYC:  '2zpg6-5493',
-  HCV:  '2zpg6-8153',
-  GUV:  '2zpg6-9093',
-};
-const WIKI_DOC_ID = '2zpg6-1403';
 const CU_BASE = 'https://api.clickup.com/api/v2';
+const CU_WIKI_DOC = '2zpg6-1403';
 const BREVO_BASE = 'https://api.brevo.com/v3';
 const SENDER = { name: 'coevo.co', email: 'midia@coevo.co' };
 const EQUIPE = [
@@ -24,65 +11,114 @@ const EQUIPE = [
   { name: 'Bruno', email: 'bruno@coevo.co' },
 ];
 
+// ─── Wiki: busca wikiUrl do CMS e lê o conteúdo da página ─────────────────
 async function getClientWikiContent(sigla) {
-  const pageId = WIKI_PAGES[sigla?.toUpperCase()];
-  if (!pageId) {
-    console.log(`[Wiki] Sem página mapeada para ${sigla} — contexto não injetado`);
-    return '';
-  }
   try {
+    // 1. Pega a URL da wiki diretamente do cadastro do subclient no CMS
+    const scResult = await wixData
+      .query('subclientes')
+      .eq('sigla', sigla?.toUpperCase())
+      .find({ suppressAuth: true });
+
+    const wikiUrl = scResult.items?.[0]?.wikiUrl;
+    if (!wikiUrl) {
+      console.log(`[Wiki] ${sigla}: sem wikiUrl no cadastro`);
+      return '';
+    }
+
+    // 2. Extrai o page ID da URL do ClickUp
+    // Formato: https://app.clickup.com/3136006/v/dc/2zpg6-1403/2zpg6-XXXX
+    const pageIdMatch = wikiUrl.match(/\/([^/]+)$/);
+    const pageId = pageIdMatch?.[1];
+    if (!pageId) {
+      console.log(`[Wiki] ${sigla}: não foi possível extrair pageId de ${wikiUrl}`);
+      return '';
+    }
+
+    // 3. Busca o conteúdo via API do ClickUp
     const token = await getSecret('CLICKUP_TOKEN');
 
-    // A API v2 do ClickUp retorna content vazio com /page/{id}?content_format=text/md
-    // O endpoint correto é listar páginas do doc com conteúdo incluso via page_ids
-    // Usando o endpoint de lista com filtro por page_id e content_format URL-encoded
-    const url = `${CU_BASE}/doc/${WIKI_DOC_ID}/page?` +
-      `page_ids[]=${pageId}&content_format=text%2Fmd`;
-
+    // Tenta endpoint de lista com page_ids (retorna conteúdo)
+    const url = `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`;
     const res = await fetch(url, { headers: { Authorization: token } });
 
     if (!res.ok) {
-      console.error(`[Wiki] HTTP ${res.status} para ${sigla} (pageId: ${pageId})`);
-      // Fallback: tenta endpoint singular com encoding alternativo
-      const res2 = await fetch(
-        `${CU_BASE}/doc/${WIKI_DOC_ID}/page/${pageId}`,
-        { headers: { Authorization: token, 'Content-Type': 'application/json' } }
-      );
-      if (!res2.ok) return '';
-      const d2 = await res2.json();
-      const c2 = (d2.content || d2.pages?.[0]?.content || '').slice(0, 4000);
-      console.log(`[Wiki] ${sigla} (fallback): ${c2.length} chars`);
-      return c2;
+      console.error(`[Wiki] ${sigla}: HTTP ${res.status}`);
+      return '';
     }
 
     const data = await res.json();
-    // Resposta pode ser { pages: [...] } ou array direto
     const pages = data.pages || (Array.isArray(data) ? data : [data]);
     const page = pages.find(p => p.id === pageId) || pages[0];
     const content = (page?.content || '').slice(0, 4000);
     console.log(`[Wiki] ${sigla}: ${content.length} chars carregados`);
     return content;
   } catch (err) {
-    console.error(`[Wiki] Erro ao buscar ${sigla}:`, err.message);
+    console.error(`[Wiki] Erro para ${sigla}:`, err.message);
     return '';
   }
 }
 
+// ─── Histórico: busca últimos briefings do cliente no CMS ─────────────────
+async function getClientHistory(sigla, limit = 3) {
+  try {
+    const result = await wixData
+      .query('briefingLogs')
+      .eq('clienteSigla', sigla?.toUpperCase())
+      .descending('_createdDate')
+      .limit(limit)
+      .find({ suppressAuth: true });
+
+    if (!result.items.length) return '';
+
+    const lines = result.items.map((item, i) => {
+      const data = new Date(item._createdDate).toLocaleDateString('pt-BR');
+      return `Briefing ${i + 1} (${data})\n` +
+        `  Solicitante: ${item.solicitanteNome || '—'}\n` +
+        `  Categoria: ${item.categoria || '—'}\n` +
+        `  Resumo: ${(item.resumo || '').slice(0, 300)}\n` +
+        `  Análise do Coevito: ${(item.analiseIA || '').slice(0, 200)}`;
+    });
+
+    return lines.join('\n\n');
+  } catch (err) {
+    console.error(`[Histórico] Erro para ${sigla}:`, err.message);
+    return '';
+  }
+}
+
+// ─── callAI ───────────────────────────────────────────────────────────────
 export async function callAI(payload) {
   try {
     const apiKey = await getSecret('ANTHROPIC_KEY');
     let systemPrompt = payload.system;
+
     if (payload.firstAnalysis && payload.clientSigla) {
-      const wikiContent = await getClientWikiContent(payload.clientSigla);
-      if (wikiContent)
-        systemPrompt += `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+      const [wikiContent, history] = await Promise.all([
+        getClientWikiContent(payload.clientSigla),
+        getClientHistory(payload.clientSigla),
+      ]);
+
+      if (wikiContent) {
+        systemPrompt +=
+          `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+      }
+
+      if (history) {
+        systemPrompt +=
+          `\n\n---\nHISTÓRICO DE BRIEFINGS ANTERIORES deste cliente:\n${history}\n\n` +
+          `Use esse histórico para personalizar sua análise. Mencione explicitamente ` +
+          `quando algo foi solicitado antes ou quando há padrões recorrentes.\n---`;
+      }
     }
+
     const body = {
       model: payload.model || 'claude-haiku-4-5-20251001',
       max_tokens: payload.max_tokens || 1000,
       system: systemPrompt,
       messages: payload.messages,
     };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -92,12 +128,14 @@ export async function callAI(payload) {
       },
       body: JSON.stringify(body),
     });
+
     const data = await response.json();
     if (!response.ok) return { error: data.error?.message || `HTTP ${response.status}` };
     return { text: data.content?.[0]?.text || '' };
   } catch (err) { return { error: err.message }; }
 }
 
+// ─── getSubclientes ────────────────────────────────────────────────────────
 export async function getSubclientes(memberId) {
   try {
     if (!memberId) return { error: 'memberId obrigatório' };
@@ -108,35 +146,53 @@ export async function getSubclientes(memberId) {
     let items = [];
     if (acesso.nivel === 'coevo_admin') {
       const r = await wixData.query('subclientes')
-        .eq('status', 'ativo')
-        .ascending('nome').limit(200).find({ suppressAuth: true });
+        .eq('status', 'ativo').ascending('nome').limit(200).find({ suppressAuth: true });
       items = r.items;
     } else if (acesso.nivel === 'cliente_rede' && acesso.clienteRef) {
       const r = await wixData.query('subclientes')
-        .eq('clienteRef', acesso.clienteRef)
-        .eq('status', 'ativo')
+        .eq('clienteRef', acesso.clienteRef).eq('status', 'ativo')
         .ascending('nome').find({ suppressAuth: true });
       items = r.items;
     } else if (acesso.nivel === 'cliente_unidade') {
-      const refs = await wixData.queryReferenced('acessoUsuario', acesso._id, 'subclientes', { suppressAuth: true });
+      const refs = await wixData.queryReferenced(
+        'acessoUsuario', acesso._id, 'subclientes', { suppressAuth: true }
+      );
       items = refs.items.filter(i => i.status === 'ativo');
     }
     return { items: items.map(i => ({ sigla: i.sigla || '', nome: i.nome || i.sigla || '' })) };
   } catch (err) { return { error: err.message }; }
 }
 
+// ─── saveBriefingLog ───────────────────────────────────────────────────────
+export async function saveBriefingLog(p) {
+  try {
+    await wixData.insert('briefingLogs', {
+      memberId:       p.memberId      || '',
+      clienteSigla:   p.clienteSigla  || '',
+      clienteNome:    p.clienteNome   || '',
+      taskId:         p.taskId        || '',
+      taskUrl:        p.taskUrl       || '',
+      categoria:      p.categoria     || '',
+      resumo:         p.resumo        || '',
+      analiseIA:      p.analiseIA     || '',
+      conversa:       p.conversa      || '',
+      solicitanteNome: p.solicitanteNome || '',
+    }, { suppressAuth: true });
+    return { ok: true };
+  } catch (err) {
+    console.error('[BriefingLog] Erro ao salvar:', err.message);
+    return { error: err.message };
+  }
+}
+
+// ─── sendBriefingEmails ────────────────────────────────────────────────────
 export async function sendBriefingEmails(p) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
-    const headers = {
-      'Content-Type': 'application/json',
-      'api-key': brevoKey,
-    };
+    const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
     const prazoFmt = p.prazo
-      ? new Date(p.prazo + 'T12:00:00').toLocaleDateString('pt-BR')
-      : '—';
-    const camposHtml = (p.campos || [])
-      .filter(c => c.value)
+      ? new Date(p.prazo + 'T12:00:00').toLocaleDateString('pt-BR') : '—';
+    const camposHtml = (p.campos || []).filter(c => c.value)
       .map(c => `<tr>
         <td style="padding:6px 12px;font-size:13px;color:#555;font-weight:600;white-space:nowrap;vertical-align:top">${c.label}</td>
         <td style="padding:6px 12px;font-size:13px;color:#1a1a1a;vertical-align:top">${c.value}</td>
