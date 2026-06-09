@@ -1,0 +1,92 @@
+// painelEmDia.jsw
+// Sistema «Painel em Dia» — emails de versões/novidades
+//
+// Recursos:
+//   adicionarMembroBrevo(email, nome)  → inscreve 1 membro na lista Brevo
+//   sincronizarMembrosBrevo()          → sincroniza TODOS os membros Wix → Brevo
+//
+// Constantes Brevo (não alterar sem atualizar o MCP/conversa):
+//   Lista  «Painel em Dia» → ID 6
+//   Template email         → ID 1
+//   Tag                    → 'painel-em-dia'
+
+import { getSecret } from 'wix-secrets-backend';
+import { members }   from 'wix-members-backend';
+
+const BREVO_BASE    = 'https://api.brevo.com/v3';
+const BREVO_LIST_ID = 6;   // lista «Painel em Dia» (folder «Painel Coevo»)
+
+// ─── Adiciona ou atualiza 1 contato na lista Brevo ───────────────────────────
+export async function adicionarMembroBrevo(email, nome) {
+  if (!email) return { ok: false, error: 'email ausente' };
+
+  const apiKey      = await getSecret('BREVO_API_KEY');
+  const partes      = (nome || '').trim().split(' ');
+  const firstName   = partes[0] || '';
+  const lastName    = partes.slice(1).join(' ') || '';
+
+  const res = await fetch(`${BREVO_BASE}/contacts`, {
+    method: 'POST',
+    headers: {
+      'api-key':      apiKey,
+      'content-type': 'application/json',
+      'accept':       'application/json',
+    },
+    body: JSON.stringify({
+      email,
+      listIds:       [BREVO_LIST_ID],
+      updateEnabled: true,          // atualiza se já existir
+      attributes: {
+        FIRSTNAME: firstName,
+        LASTNAME:  lastName,
+      },
+    }),
+  });
+
+  // 201 = criado, 204 = atualizado — ambos são sucesso
+  if (res.ok || res.status === 204) return { ok: true };
+
+  const err = await res.text();
+  console.warn(`[painelEmDia] adicionarMembroBrevo [${email}] ${res.status}:`, err);
+  return { ok: false, error: err };
+}
+
+// ─── Sincroniza TODOS os membros Wix ativos → lista Brevo ───────────────────
+// Chame manualmente sempre que quiser garantir que a lista está atualizada.
+// Ideal para rodar uma vez após o deploy inicial.
+export async function sincronizarMembrosBrevo() {
+  const limit = 50;
+  let skip    = 0;
+  let total   = 0;
+  let sincronizados = 0;
+  let erros   = 0;
+
+  do {
+    const res = await members.queryMembers()
+      .limit(limit)
+      .skip(skip)
+      .find({ suppressAuth: true });
+
+    if (skip === 0) total = res.totalCount;
+    if (!res.items.length) break;
+
+    for (const m of res.items) {
+      const email = m.loginEmail;
+      if (!email) { erros++; continue; }
+
+      const nome = [
+        m.profile?.firstName,
+        m.profile?.lastName,
+      ].filter(Boolean).join(' ') || email;
+
+      const r = await adicionarMembroBrevo(email, nome);
+      if (r.ok) sincronizados++;
+      else      erros++;
+    }
+
+    skip += res.items.length;
+  } while (skip < total);
+
+  console.log(`[painelEmDia] sync concluído: ${sincronizados}/${total} ok, ${erros} erros`);
+  return { ok: erros === 0, sincronizados, erros, total };
+}
