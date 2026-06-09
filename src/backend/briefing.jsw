@@ -34,7 +34,6 @@ async function getClientWikiContent(sigla) {
 
     if (!res.ok) {
       console.error(`[Wiki] ${sigla}: HTTP ${res.status}`);
-      // Fallback: endpoint de lista
       const res2 = await fetch(
         `${CU_BASE}/doc/${CU_WIKI_DOC}/page?page_ids[]=${pageId}&content_format=text%2Fmd`,
         { headers: { Authorization: token } }
@@ -88,33 +87,67 @@ async function getClientHistory(sigla, limit = 3) {
 export async function callAI(payload) {
   try {
     const apiKey = await getSecret('ANTHROPIC_KEY');
-    let systemPrompt = payload.system;
+
+    // System prompt base (instruções do Coevito) — sempre igual
+    let staticPart = payload.system;
+    let dynamicPart = ''; // histórico — muda a cada briefing, não é cacheável
 
     if (payload.firstAnalysis && payload.clientSigla) {
       const [wikiContent, history] = await Promise.all([
         getClientWikiContent(payload.clientSigla),
         getClientHistory(payload.clientSigla),
       ]);
+
+      // Wiki vai no bloco estático (cacheável) — muda só se a wiki for editada
       if (wikiContent)
-        systemPrompt += `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+        staticPart += `\n\n---\nCONTEXTO DO CLIENTE (wiki interna Coevo):\n${wikiContent}\n---`;
+
+      // Histórico vai no bloco dinâmico (não cacheável) — muda a cada novo briefing
       if (history)
-        systemPrompt += `\n\n---\nHISTÓRICO DE BRIEFINGS ANTERIORES deste cliente:\n${history}\n\n` +
+        dynamicPart = `\n\n---\nHISTÓRICO DE BRIEFINGS ANTERIORES deste cliente:\n${history}\n\n` +
           `Use esse histórico para personalizar sua análise. Mencione explicitamente ` +
           `quando algo foi solicitado antes ou quando há padrões recorrentes.\n---`;
     }
 
+    // Monta system como array de blocos para prompt caching:
+    // Bloco 1: instruções + wiki → cache_control ephemeral (cacheado por 5 min)
+    // Bloco 2: histórico → sem cache (varia por cliente/sessão)
+    const systemBlocks = [
+      {
+        type: 'text',
+        text: staticPart,
+        cache_control: { type: 'ephemeral' },
+      },
+    ];
+    if (dynamicPart) {
+      systemBlocks.push({ type: 'text', text: dynamicPart });
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'prompt-caching-2024-07-31',
+      },
       body: JSON.stringify({
         model: payload.model || 'claude-haiku-4-5-20251001',
         max_tokens: payload.max_tokens || 1000,
-        system: systemPrompt,
+        system: systemBlocks,
         messages: payload.messages,
       }),
     });
+
     const data = await response.json();
     if (!response.ok) return { error: data.error?.message || `HTTP ${response.status}` };
+
+    // Log de cache para monitoramento
+    if (data.usage) {
+      const { cache_creation_input_tokens: write = 0, cache_read_input_tokens: read = 0 } = data.usage;
+      console.log(`[Cache] write=${write} read=${read} input=${data.usage.input_tokens}`);
+    }
+
     return { text: data.content?.[0]?.text || '' };
   } catch (err) { return { error: err.message }; }
 }
@@ -147,7 +180,7 @@ export async function getSubclientes(memberId) {
   } catch (err) { return { error: err.message }; }
 }
 
-// ─── createBriefingLog — cria o registro inicial ao entrar no chat ────────
+// ─── createBriefingLog ────────────────────────────────────────────────────
 export async function createBriefingLog(p) {
   try {
     const inserted = await wixData.insert('briefingLogs', {
@@ -157,7 +190,6 @@ export async function createBriefingLog(p) {
       categoria:       p.categoria       || '',
       resumo:          p.resumo          || '',
       solicitanteNome: p.solicitanteNome  || '',
-      // Campos que ainda não existem neste momento
       taskId:   '',
       taskUrl:  '',
       analiseIA: '',
@@ -170,11 +202,10 @@ export async function createBriefingLog(p) {
   }
 }
 
-// ─── updateBriefingLog — atualiza o registro após envio ao ClickUp ────────
+// ─── updateBriefingLog ────────────────────────────────────────────────────
 export async function updateBriefingLog(p) {
   try {
     if (!p.logId) return { error: 'logId obrigatório' };
-    // wixData.update exige o _id e todos os campos presentes no item
     const existing = await wixData.get('briefingLogs', p.logId, { suppressAuth: true });
     if (!existing) return { error: 'registro não encontrado' };
     await wixData.update('briefingLogs', {
