@@ -87,6 +87,7 @@ export async function getTarefasCliente(siglas) {
   const url =
     `https://api.clickup.com/api/v2/team/${TEAM_ID}/task` +
     `?project_ids[]=${FOLDER_ID}` +
+    `&subtasks=true` +
     `&include_closed=true` +
     `&due_date_gt=${dueGt}` +
     `&due_date_lt=${dueLt}` +
@@ -115,20 +116,16 @@ function _normalize(tasks, now) {
       const concluida = t.status?.type === 'closed';
       const atrasada  = !concluida && diasDiff !== null && diasDiff < 0;
 
-      // --- Extração de sigla: suporta todos os formatos que a API pode retornar ---
       const clienteF = (t.custom_fields || []).find(f => f.id === FIELD_CLI);
       let sigla = '';
       if (clienteF?.value?.length > 0) {
         const v = clienteF.value[0];
         if (typeof v === 'string') {
-          // API retornou ID puro → busca reversa no mapa SIGLAS
           sigla = Object.keys(SIGLAS).find(k => SIGLAS[k].id === v) || '';
         } else if (v && typeof v === 'object') {
-          // API retornou objeto → tenta .label e depois .name
           sigla = (v.label || v.name || '').toUpperCase();
         }
       }
-      // Fallback: extrai do nome no padrão "SIGLA | descrição"
       if (!sigla) {
         const m = (t.name || '').match(/^([A-Z]{2,6})\s*\|/);
         if (m) sigla = m[1];
@@ -136,7 +133,7 @@ function _normalize(tasks, now) {
       const siglaColor = SIGLAS[sigla]?.color || '#6b7280';
 
       const assignee    = t.assignees?.[0];
-      const responsavel = assignee ? (assignee.username || assignee.email || '—') : '—';
+      const responsavel = assignee ? (assignee.username || assignee.email || '\u2014') : '\u2014';
 
       const statusNorm = (t.status?.status || '')
         .toLowerCase()
@@ -152,7 +149,7 @@ function _normalize(tasks, now) {
         prazo,
         prazoFormatado:  prazo
           ? new Date(prazo).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
-          : '—',
+          : '\u2014',
         lista:           t.list?.name || '',
         responsavel,
         descricao:       (t.description || '').slice(0, 180).trim(),
