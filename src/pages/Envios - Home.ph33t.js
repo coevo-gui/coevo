@@ -103,6 +103,7 @@ $w.onReady(async () => {
         }
         case 'ENVIAR_DISPAROS': {
           const { disparoId, itens } = payload;
+          // Salva os dados do formulário antes de enviar
           await Promise.all(itens.map(item =>
             wixData.update('itensDisparo', {
               _id: item._id, valorInvestimento: item.valorInvestimento,
@@ -110,7 +111,14 @@ $w.onReady(async () => {
             })
           ));
           const result = await enviarDisparos(disparoId);
-          reply({ ok: result.ok, enviados: result.enviados, erros: result.erros, total: result.total });
+          // Propaga result.error se presente (backend retorna em vez de throw)
+          reply({
+            ok: result.ok,
+            enviados: result.enviados || 0,
+            erros: result.erros || 0,
+            total: result.total || 0,
+            error: result.error || null
+          });
           break;
         }
         default:
@@ -122,37 +130,22 @@ $w.onReady(async () => {
     }
   });
 
-  // ── AUTH com logs granulares ──────────────────────────────────────────────
+  // AUTH com logs granulares
   try {
     console.log('[Envios Velo] [1] chamando getMember()...');
     const member = await currentMember.getMember({ fieldsets: ['FULL'] });
     console.log('[Envios Velo] [2] getMember OK. member:', member ? member._id : 'null');
 
-    if (!member) {
-      console.log('[Envios Velo] [3] sem member → /login');
-      wixLocation.to('/login');
-      return;
-    }
+    if (!member) { wixLocation.to('/login'); return; }
 
     console.log('[Envios Velo] [3] consultando acessoUsuario para memberId:', member._id);
-    const acesso = await wixData
-      .query('acessoUsuario')
-      .eq('memberId', member._id)
-      .find();
+    const acesso = await wixData.query('acessoUsuario').eq('memberId', member._id).find();
     console.log('[Envios Velo] [4] acesso.items.length:', acesso.items.length);
 
-    if (!acesso.items.length) {
-      console.log('[Envios Velo] [5] nenhum acesso encontrado → /portal');
-      wixLocation.to('/portal');
-      return;
-    }
+    if (!acesso.items.length) { wixLocation.to('/portal'); return; }
 
     console.log('[Envios Velo] [5] nivel:', acesso.items[0].nivel);
-    if (acesso.items[0].nivel !== 'coevo_admin') {
-      console.log('[Envios Velo] [6] não é admin → /portal');
-      wixLocation.to('/portal');
-      return;
-    }
+    if (acesso.items[0].nivel !== 'coevo_admin') { wixLocation.to('/portal'); return; }
 
     authDone = true;
     console.log('[Envios Velo] [6] AUTH OK. htmlReady:', htmlReady);
