@@ -1,12 +1,7 @@
-// Página: Disparos de Cobrança — /portal/envios
-// Tipo: Página de membro (privada, somente coevo_admin)
-//
-// Elemento necessário na página: UMA HtmlComponent
-//   ID: #htmlDisparos
-//   Src: URL do disparos.html (hospedado no Wix Media Manager)
-//   Tamanho: largura 100%, altura mínima 800px, Scrolling: habilitado
-//
-// Nenhum outro elemento Wix é necessário nesta página.
+// Página: Disparos de Cobrança — /portal/envios (Envios - Home)
+// Elemento na página: #htmlDisparos (HtmlComponent)
+//   Src: URL do disparos.html hospedado no Wix Media Manager
+//   Protocolo: mesmo padrão do Smart Briefing (campo id para correlação)
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -22,7 +17,6 @@ function parseBRL(str) {
 
 $w.onReady(async () => {
   try {
-    // ── Verificação de acesso ──────────────────────────────
     const member = await currentMember.getMember();
     if (!member) { wixLocation.to('/login'); return; }
 
@@ -38,44 +32,38 @@ $w.onReady(async () => {
 
     $w('#htmlDisparos').show();
 
-    // ── Roteador de mensagens do HTML ──────────────────────
-    $w('#htmlDisparos').onMessage(async (e) => {
-      const msg = e.data;
-      if (!msg?.type) return;
+    // Mesmo padrão do Smart Briefing: { id, type, payload }
+    // reply() envia de volta incluindo o mesmo id para correlação
+    $w('#htmlDisparos').onMessage(async (event) => {
+      const { id, type, payload } = event.data;
+      if (!type) return;
+
+      const reply = (data) => $w('#htmlDisparos').postMessage({ id, type: type + '_RESULT', ...data });
 
       try {
-        switch (msg.type) {
+        switch (type) {
 
-          // ── Lista de disparos ────────────────────────────
           case 'FETCH_DISPAROS': {
             const result = await wixData
               .query('disparos')
               .descending('_createdDate')
               .find();
-            $w('#htmlDisparos').postMessage({
-              type: 'DISPAROS_DATA',
-              data: result.items
-            });
+            reply({ data: result.items });
             break;
           }
 
-          // ── Lista de subclientes ─────────────────────────
           case 'FETCH_SUBCLIENTES': {
             const result = await wixData
               .query('subclientes')
               .eq('status', 'ativo')
               .ascending('nome')
               .find();
-            $w('#htmlDisparos').postMessage({
-              type: 'SUBCLIENTES_DATA',
-              data: result.items
-            });
+            reply({ data: result.items });
             break;
           }
 
-          // ── Criar novo disparo + itens ───────────────────
           case 'CREATE_DISPARO': {
-            const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds } = msg.payload;
+            const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds } = payload;
 
             const novoDisparo = await wixData.insert('disparos', {
               titulo,
@@ -95,7 +83,7 @@ $w.onReady(async () => {
             const scMap = {};
             scResult.items.forEach(sc => { scMap[sc._id] = sc; });
 
-            const inserts = subclienteIds.map(scId => {
+            const itens = await Promise.all(subclienteIds.map(scId => {
               const sc = scMap[scId] || {};
               const valor = plataforma === 'mads'
                 ? parseBRL(sc.valorMidiaMeta)
@@ -109,32 +97,23 @@ $w.onReady(async () => {
                 boletoUrl: '',
                 statusEnvio: 'pendente'
               });
-            });
-            const itens = await Promise.all(inserts);
+            }));
 
             const itensComSC = itens.map(item => ({
               ...item,
               _sc: scMap[item.subclienteRef] || {}
             }));
 
-            $w('#htmlDisparos').postMessage({
-              type: 'DISPARO_CREATED',
-              disparoId: novoDisparo._id,
-              disparo: novoDisparo,
-              itens: itensComSC
-            });
+            reply({ disparoId: novoDisparo._id, disparo: novoDisparo, itens: itensComSC });
             break;
           }
 
-          // ── Carregar itens de disparo existente ──────────
           case 'FETCH_ITENS': {
-            const { disparoId } = msg.payload;
-
+            const { disparoId } = payload;
             const [disparo, itensResult] = await Promise.all([
               wixData.get('disparos', disparoId),
               wixData.query('itensDisparo').eq('disparoRef', disparoId).find()
             ]);
-
             const itens = itensResult.items;
             const scIds = [...new Set(itens.map(i => i.subclienteRef))];
             const scResult = scIds.length
@@ -142,18 +121,15 @@ $w.onReady(async () => {
               : { items: [] };
             const scMap = {};
             scResult.items.forEach(sc => { scMap[sc._id] = sc; });
-
-            $w('#htmlDisparos').postMessage({
-              type: 'ITENS_DATA',
+            reply({
               disparo,
               itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} }))
             });
             break;
           }
 
-          // ── Salvar rascunho ──────────────────────────────
           case 'SALVAR_RASCUNHO': {
-            const { itens } = msg.payload;
+            const { itens } = payload;
             await Promise.all(itens.map(item =>
               wixData.update('itensDisparo', {
                 _id: item._id,
@@ -163,14 +139,12 @@ $w.onReady(async () => {
                 boletoUrl: item.boletoUrl || ''
               })
             ));
-            $w('#htmlDisparos').postMessage({ type: 'RASCUNHO_SAVED' });
+            reply({ ok: true });
             break;
           }
 
-          // ── Salvar + enviar emails ───────────────────────
           case 'ENVIAR_DISPAROS': {
-            const { disparoId, itens } = msg.payload;
-
+            const { disparoId, itens } = payload;
             await Promise.all(itens.map(item =>
               wixData.update('itensDisparo', {
                 _id: item._id,
@@ -180,25 +154,17 @@ $w.onReady(async () => {
                 boletoUrl: item.boletoUrl || ''
               })
             ));
-
             const result = await enviarDisparos(disparoId);
-
-            $w('#htmlDisparos').postMessage({
-              type: 'ENVIO_RESULT',
-              ok: result.ok,
-              enviados: result.enviados,
-              erros: result.erros,
-              total: result.total
-            });
+            reply({ ok: result.ok, enviados: result.enviados, erros: result.erros, total: result.total });
             break;
           }
+
+          default:
+            console.warn('[Envios] Tipo de mensagem desconhecido:', type);
         }
       } catch (err) {
-        console.error('[Envios] Erro no handler', msg.type, ':', err);
-        $w('#htmlDisparos').postMessage({
-          type: 'ERROR',
-          message: 'Erro interno: ' + (err.message || 'tente novamente.')
-        });
+        console.error('[Envios] Erro no handler', type, ':', err);
+        reply({ error: err.message || 'Erro interno.' });
       }
     });
 
