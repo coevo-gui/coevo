@@ -8,6 +8,7 @@ import wixData from 'wix-data';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const REMETENTE = { name: 'Mídia Coevo', email: 'midia@coevo.co' };
+const LOGO_URL = 'https://static.wixstatic.com/media/9653d9_6b9111f9787f4822accd18f99d0fb9c9~mv2.png';
 
 function parseBRL(str) {
   if (!str) return 0;
@@ -57,7 +58,6 @@ export async function criarDisparoComItens(payload) {
       ok: true,
       disparoId: novoDisparo._id,
       disparo: novoDisparo,
-      // FIX: usar subclienteIds[i] (item.subclienteRef pode vir null do insert)
       itens: itens.map((item, i) => ({ ...item, _sc: scMap[subclienteIds[i]] || {} }))
     };
   } catch (err) {
@@ -144,37 +144,88 @@ function buildAssunto(disparo, sc) {
 
 function buildHtml(disparo, item, sc) {
   const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
-  const venc = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '—';
+  const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
   const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS', ambas: 'GOOGLE ADS e META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
+  const textoCorpo = disparo.textoCorpo || `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`;
+
   const blocoPagamento = item.tipoPagamento === 'pix'
-    ? `<p style="margin:0 0 8px 0"><strong>CÓDIGO PIX:</strong></p>
-       <div style="background:#f5f7ff;border:1px solid #ccd4ff;border-radius:6px;padding:12px;
-                   font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.5">
-         ${item.pixCode || ''}
-       </div>`
-    : `<p style="margin:0 0 8px 0"><strong>LINK DO BOLETO:</strong></p>
-       <p style="margin:0">
-         <a href="${item.boletoUrl || '#'}" style="color:#002bff;font-weight:600">
-           ${sc.sigla} - ${sc.nome} - Download do Boleto
-         </a>
-       </p>`;
+    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p>
+       <div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
+    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p>
+       <a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<body style="font-family:Arial,sans-serif;font-size:14px;color:#333333;max-width:600px;margin:0 auto;padding:24px;line-height:1.6">
-  <p>Bom dia,</p>
-  <p>Prezado(a) Parceiro COEVO,</p>
-  <p>${disparo.textoCorpo || `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`}</p>
-  <div style="background:#f9f9ff;border-left:4px solid #002bff;border-radius:6px;padding:16px 20px;margin:20px 0">
-    <p style="margin:0 0 10px 0"><strong>Sobre a cobrança:</strong></p>
-    <p style="margin:0 0 4px 0">Hotel: ${sc.nome}</p>
-    <p style="margin:0 0 4px 0">CNPJ: ${sc.cnpj || '—'}</p>
-    <p style="margin:0 0 4px 0">Valor: <strong>${valor}</strong></p>
-    <p style="margin:0"><strong>Pagar até: ${venc}</strong></p>
-  </div>
-  <div style="margin:20px 0">${blocoPagamento}</div>
-  <p><em>Por favor, é importante que seja pago dentro do período informado, para evitar que a conta fique sem saldo.</em></p>
-  <p>É isso! Obrigado pela sua atenção! ;)</p>
-  <p>Equipe <a href="https://coevo.co" style="color:#002bff">coevo.co</a></p>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5">
+<tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)">
+
+    <!-- HEADER -->
+    <tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff">
+      <img src="${LOGO_URL}" alt="Coevo" width="160" style="display:inline-block;max-width:160px;height:auto">
+    </td></tr>
+
+    <!-- BODY -->
+    <tr><td style="padding:32px 36px 28px">
+      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">Bom dia,</p>
+      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">Prezado(a) Parceiro COEVO,</p>
+      <p style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpo}</p>
+
+      <!-- Billing info card -->
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px">
+        <tr><td style="padding:20px 24px">
+          <p style="margin:0 0 12px;color:#0a0a1a;font-size:10px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase">Sobre a Cobran&ccedil;a</p>
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px;white-space:nowrap">Hotel:</td>
+              <td style="padding:3px 0;color:#0a0a1a;font-size:13px;font-weight:600">${sc.nome}</td>
+            </tr>
+            <tr>
+              <td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">CNPJ:</td>
+              <td style="padding:3px 0;color:#0a0a1a;font-size:13px">${sc.cnpj || '\u2014'}</td>
+            </tr>
+            <tr>
+              <td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Valor:</td>
+              <td style="padding:3px 0;color:#002bff;font-size:17px;font-weight:bold">${valor}</td>
+            </tr>
+            <tr>
+              <td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Vencimento:</td>
+              <td style="padding:3px 0;color:#0a0a1a;font-size:14px;font-weight:700">${venc}</td>
+            </tr>
+          </table>
+        </td></tr>
+      </table>
+
+      <!-- Payment section -->
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 24px">
+        <tr><td style="padding:20px 24px">${blocoPagamento}</td></tr>
+      </table>
+
+      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">
+        Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado,
+        para evitar que a conta fique sem saldo.
+      </p>
+      <p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p>
+      <p style="margin:0;color:#0a0a1a;font-size:14px">
+        Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a>
+      </p>
+    </td></tr>
+
+    <!-- FOOTER -->
+    <tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center">
+      <p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">
+        &copy; Coevo &middot; Marketing de Hotelaria &middot;
+        <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a>
+        &middot;
+        <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a>
+      </p>
+    </td></tr>
+
+  </table>
+</td></tr>
+</table>
 </body>
 </html>`;
 }
@@ -206,12 +257,10 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
 
-    // Coleta scIds: prioriza itemScMap (estado local), fallback para subclienteRef da query
     const scIds = [...new Set(
       itens.map(item => itemScMap[item._id] || item.subclienteRef)
     )].filter(Boolean);
 
-    // get individual por scId — mais confiável que hasSome para REFERENCE
     const scArr = scIds.length
       ? await Promise.all(scIds.map(scId =>
           wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null)
@@ -235,9 +284,8 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         continue;
       }
 
-      // Monta lista de destinatários
       const toEmails = [];
-      if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))  toEmails.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
+      if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   toEmails.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
       if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) toEmails.push({ email: sc.emailGerenteGeral, name: sc.nome });
       if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     toEmails.push({ email: sc.focalMktEmail,    name: sc.nome });
 
@@ -249,7 +297,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
       }
 
       if (!toEmails.length) {
-        console.warn('[emailDisparo] nenhum destinatário válido para:', scId, '| dest:', JSON.stringify(dest));
+        console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
         erros++;
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
         if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
