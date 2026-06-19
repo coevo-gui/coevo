@@ -3,8 +3,8 @@
 //
 // Pré-requisitos:
 //   1. Conta Brevo em brevo.com com domínio coevo.co verificado (SPF + DKIM)
-//   2. API key salva no Wix Secrets Manager com o nome: BREVO_API_KEY
-//   3. Remetente verificado: midia@coevo.co
+//   2. Remetente verificado: midia@coevo.co
+//   3. API key salva no Wix Secrets Manager com o nome EXATO: BREVO_API_KEY
 
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
@@ -20,25 +20,14 @@ function buildAssunto(disparo, sc) {
   const dataRef = disparo.mesReferencia
     ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
-  const plat = {
-    gads: 'Google Ads',
-    mads: 'Meta Ads',
-    ambas: 'Google Ads e Meta Ads'
-  }[disparo.plataforma] || disparo.plataforma || '';
+  const plat = { gads: 'Google Ads', mads: 'Meta Ads', ambas: 'Google Ads e Meta Ads' }[disparo.plataforma] || disparo.plataforma || '';
   return `COEVO | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
 }
 
 function buildHtml(disparo, item, sc) {
   const valor = formatarBRL(item.valorInvestimento);
-  const venc = disparo.dataVencimento
-    ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR')
-    : '—';
-  const platUpper = {
-    gads: 'GOOGLE ADS',
-    mads: 'META ADS',
-    ambas: 'GOOGLE ADS e META ADS'
-  }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
-
+  const venc = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '—';
+  const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS', ambas: 'GOOGLE ADS e META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
   const blocoPagamento = item.tipoPagamento === 'pix'
     ? `<p style="margin:0 0 8px 0"><strong>CÓDIGO PIX:</strong></p>
        <div style="background:#f5f7ff;border:1px solid #ccd4ff;border-radius:6px;padding:12px;
@@ -51,18 +40,13 @@ function buildHtml(disparo, item, sc) {
            ${sc.sigla} - ${sc.nome} - Download do Boleto
          </a>
        </p>`;
-
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<body style="font-family:Arial,sans-serif;font-size:14px;color:#333333;
-             max-width:600px;margin:0 auto;padding:24px;line-height:1.6">
+<body style="font-family:Arial,sans-serif;font-size:14px;color:#333333;max-width:600px;margin:0 auto;padding:24px;line-height:1.6">
   <p>Bom dia,</p>
   <p>Prezado(a) Parceiro COEVO,</p>
-  <p>${disparo.textoCorpo ||
-    `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`
-  }</p>
-  <div style="background:#f9f9ff;border-left:4px solid #002bff;border-radius:6px;
-              padding:16px 20px;margin:20px 0">
+  <p>${disparo.textoCorpo || `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`}</p>
+  <div style="background:#f9f9ff;border-left:4px solid #002bff;border-radius:6px;padding:16px 20px;margin:20px 0">
     <p style="margin:0 0 10px 0"><strong>Sobre a cobrança:</strong></p>
     <p style="margin:0 0 4px 0">Hotel: ${sc.nome}</p>
     <p style="margin:0 0 4px 0">CNPJ: ${sc.cnpj || '—'}</p>
@@ -70,29 +54,29 @@ function buildHtml(disparo, item, sc) {
     <p style="margin:0"><strong>Pagar até: ${venc}</strong></p>
   </div>
   <div style="margin:20px 0">${blocoPagamento}</div>
-  <p><em>Por favor, é importante que seja pago dentro do período informado,
-     para evitar que a conta fique sem saldo.</em></p>
+  <p><em>Por favor, é importante que seja pago dentro do período informado, para evitar que a conta fique sem saldo.</em></p>
   <p>É isso! Obrigado pela sua atenção! ;)</p>
   <p>Equipe <a href="https://coevo.co" style="color:#002bff">coevo.co</a></p>
 </body>
 </html>`;
 }
 
-/**
- * Envia os emails de cobrança para todos os itens de um disparo.
- * @param {string} disparoId — _id do registro na coleção `disparos`
- * @returns {{ ok: boolean, enviados: number, erros: number, total: number }}
- */
 export async function enviarDisparos(disparoId) {
-  const apiKey = await getSecret('BREVO_API_KEY');
+  // Valida o secret antes de qualquer coisa — erro claro se não configurado
+  let apiKey;
+  try {
+    apiKey = await getSecret('BREVO_API_KEY');
+  } catch (e) {
+    throw new Error('BREVO_API_KEY não encontrada no Secrets Manager. Configure-a em: Wix Editor → Painel Velo → Secrets Manager.');
+  }
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY está vazia no Secrets Manager.');
+  }
 
   const disparo = await wixData.get('disparos', disparoId);
   if (!disparo) throw new Error('Disparo não encontrado: ' + disparoId);
 
-  const itensResult = await wixData
-    .query('itensDisparo')
-    .eq('disparoRef', disparoId)
-    .find();
+  const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).find();
   const itens = itensResult.items;
   if (!itens.length) throw new Error('Nenhum item encontrado para o disparo: ' + disparoId);
 
@@ -106,20 +90,14 @@ export async function enviarDisparos(disparoId) {
 
   for (const item of itens) {
     const sc = scMap[item.subclienteRef];
-
     if (!sc || !sc.emailFinanceiro) {
-      console.warn('Subcliente sem emailFinanceiro — pulando:', item.subclienteRef);
+      console.warn('[emailDisparo] Subcliente sem emailFinanceiro — pulando:', item.subclienteRef);
       erros++;
       await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' });
       continue;
     }
 
-    const ccList = (sc.emailsCopia || '')
-      .split(',')
-      .map(e => e.trim())
-      .filter(Boolean)
-      .map(email => ({ email }));
-
+    const ccList = (sc.emailsCopia || '').split(',').map(e => e.trim()).filter(Boolean).map(email => ({ email }));
     const payload = {
       sender: REMETENTE,
       to: [{ email: sc.emailFinanceiro, name: sc.contatoFinanceiro || sc.nome }],
@@ -131,40 +109,27 @@ export async function enviarDisparos(disparoId) {
     try {
       const res = await fetch(BREVO_URL, {
         method: 'POST',
-        headers: {
-          'accept': 'application/json',
-          'api-key': apiKey,
-          'content-type': 'application/json'
-        },
+        headers: { 'accept': 'application/json', 'api-key': apiKey, 'content-type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
       if (res.ok) {
         enviados++;
-        await wixData.update('itensDisparo', {
-          _id: item._id,
-          statusEnvio: 'enviado',
-          emailEnviadoPara: sc.emailFinanceiro
-        });
+        await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'enviado', emailEnviadoPara: sc.emailFinanceiro });
       } else {
         const errText = await res.text();
-        console.error(`Brevo error [${sc.sigla}]: ${res.status}`, errText);
+        console.error(`[emailDisparo] Brevo error [${sc.sigla}]: ${res.status}`, errText);
         erros++;
         await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' });
       }
     } catch (err) {
-      console.error(`Fetch error [${sc.sigla}]:`, err);
+      console.error(`[emailDisparo] Fetch error [${sc.sigla}]:`, err.message || err);
       erros++;
       await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' });
     }
   }
 
   const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
-  await wixData.update('disparos', {
-    _id: disparoId,
-    status: statusFinal,
-    totalEnviados: enviados
-  });
+  await wixData.update('disparos', { _id: disparoId, status: statusFinal, totalEnviados: enviados });
 
   return { ok: erros === 0, enviados, erros, total: itens.length };
 }
