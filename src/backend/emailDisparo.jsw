@@ -1,6 +1,4 @@
 // Web Method — Disparos de Cobrança
-// Mesmo padrão do briefing.jsw: suppressAuth: true em todos os wixData calls
-
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
@@ -57,73 +55,105 @@ function buildHtml(disparo, item, sc) {
 }
 
 export async function enviarDisparos(disparoId) {
-  const brevoKey = await getSecret('BREVO_API_KEY');
-  const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
+  try {
+    // [1] Secret
+    console.log('[emailDisparo] [1] getSecret BREVO_API_KEY...');
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    console.log('[emailDisparo] [2] brevoKey OK, length:', brevoKey ? brevoKey.length : 'null');
+    const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
 
-  // suppressAuth: true — mesmo padrão do briefing.jsw
-  const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
-  if (!disparo) throw new Error('Disparo não encontrado: ' + disparoId);
+    // [2] Busca disparo
+    console.log('[emailDisparo] [3] wixData.get disparos id:', disparoId);
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    console.log('[emailDisparo] [4] disparo:', disparo ? disparo._id : 'null');
+    if (!disparo) throw new Error('Disparo não encontrado: ' + disparoId);
 
-  const itensResult = await wixData
-    .query('itensDisparo')
-    .eq('disparoRef', disparoId)
-    .find({ suppressAuth: true });
-  const itens = itensResult.items;
-  if (!itens.length) throw new Error('Nenhum item encontrado para: ' + disparoId);
+    // [3] Busca itens
+    console.log('[emailDisparo] [5] query itensDisparo...');
+    const itensResult = await wixData
+      .query('itensDisparo')
+      .eq('disparoRef', disparoId)
+      .find({ suppressAuth: true });
+    const itens = itensResult.items;
+    console.log('[emailDisparo] [6] itens.length:', itens.length);
+    if (!itens.length) throw new Error('Nenhum item encontrado para: ' + disparoId);
 
-  const scIds = [...new Set(itens.map(i => i.subclienteRef))];
-  const scResult = await wixData
-    .query('subclientes')
-    .hasSome('_id', scIds)
-    .find({ suppressAuth: true });
-  const scMap = {};
-  scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+    // [4] Busca subclientes
+    const scIds = [...new Set(itens.map(i => i.subclienteRef))];
+    console.log('[emailDisparo] [7] query subclientes, scIds:', scIds.length);
+    const scResult = await wixData
+      .query('subclientes')
+      .hasSome('_id', scIds)
+      .find({ suppressAuth: true });
+    const scMap = {};
+    scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+    console.log('[emailDisparo] [8] subclientes encontrados:', scResult.items.length);
 
-  let enviados = 0;
-  let erros = 0;
+    let enviados = 0;
+    let erros = 0;
 
-  for (const item of itens) {
-    const sc = scMap[item.subclienteRef];
-    if (!sc || !sc.emailFinanceiro) {
-      console.warn('[emailDisparo] Subcliente sem emailFinanceiro — pulando:', item.subclienteRef);
-      erros++;
-      await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' }, { suppressAuth: true });
-      continue;
-    }
+    for (const item of itens) {
+      const sc = scMap[item.subclienteRef];
+      console.log('[emailDisparo] [9] processando item:', item._id, 'sc:', sc ? sc.sigla : 'não encontrado');
 
-    const ccList = (sc.emailsCopia || '').split(',').map(e => e.trim()).filter(Boolean).map(email => ({ email }));
-    const payload = {
-      sender: REMETENTE,
-      to: [{ email: sc.emailFinanceiro, name: sc.contatoFinanceiro || sc.nome }],
-      cc: ccList,
-      subject: buildAssunto(disparo, sc),
-      htmlContent: buildHtml(disparo, item, sc)
-    };
-
-    try {
-      const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(payload) });
-      if (res.ok) {
-        enviados++;
-        await wixData.update('itensDisparo', {
-          _id: item._id, statusEnvio: 'enviado', emailEnviadoPara: sc.emailFinanceiro
-        }, { suppressAuth: true });
-      } else {
-        const errText = await res.text();
-        console.error(`[emailDisparo] Brevo error [${sc.sigla}]: ${res.status}`, errText);
+      if (!sc || !sc.emailFinanceiro) {
+        console.warn('[emailDisparo] [10] sem emailFinanceiro — pulando:', item.subclienteRef);
         erros++;
-        await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' }, { suppressAuth: true });
+        await wixData.update('itensDisparo', { ...item, statusEnvio: 'erro' }, { suppressAuth: true });
+        continue;
       }
-    } catch (err) {
-      console.error(`[emailDisparo] Fetch error [${sc.sigla}]:`, err.message || err);
-      erros++;
-      await wixData.update('itensDisparo', { _id: item._id, statusEnvio: 'erro' }, { suppressAuth: true });
+
+      console.log('[emailDisparo] [10] emailFinanceiro:', sc.emailFinanceiro);
+      const ccList = (sc.emailsCopia || '').split(',').map(e => e.trim()).filter(Boolean).map(email => ({ email }));
+      const payload = {
+        sender: REMETENTE,
+        to: [{ email: sc.emailFinanceiro, name: sc.contatoFinanceiro || sc.nome }],
+        cc: ccList,
+        subject: buildAssunto(disparo, sc),
+        htmlContent: buildHtml(disparo, item, sc)
+      };
+
+      try {
+        console.log('[emailDisparo] [11] fetch Brevo para:', sc.sigla);
+        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(payload) });
+        console.log('[emailDisparo] [12] Brevo status:', res.status);
+        if (res.ok) {
+          enviados++;
+          // Fetch existing item first to preserve fields (igual briefing.jsw)
+          const existingItem = await wixData.get('itensDisparo', item._id, { suppressAuth: true });
+          await wixData.update('itensDisparo', {
+            ...existingItem,
+            statusEnvio: 'enviado',
+            emailEnviadoPara: sc.emailFinanceiro
+          }, { suppressAuth: true });
+        } else {
+          const errText = await res.text();
+          console.error(`[emailDisparo] Brevo error [${sc.sigla}]: ${res.status}`, errText);
+          erros++;
+          const existingItem2 = await wixData.get('itensDisparo', item._id, { suppressAuth: true });
+          await wixData.update('itensDisparo', { ...existingItem2, statusEnvio: 'erro' }, { suppressAuth: true });
+        }
+      } catch (err) {
+        console.error(`[emailDisparo] Fetch error [${sc.sigla}]:`, err.message || err);
+        erros++;
+      }
     }
+
+    // Atualiza status do disparo
+    console.log('[emailDisparo] [13] atualizando disparo. enviados:', enviados, 'erros:', erros);
+    const existingDisparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
+    await wixData.update('disparos', {
+      ...existingDisparo,
+      status: statusFinal,
+      totalEnviados: enviados
+    }, { suppressAuth: true });
+
+    console.log('[emailDisparo] [14] CONCLUÍDO. status:', statusFinal);
+    return { ok: erros === 0, enviados, erros, total: itens.length };
+
+  } catch (topErr) {
+    console.error('[emailDisparo] ERRO TOP-LEVEL:', topErr.message || topErr);
+    throw topErr;
   }
-
-  const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
-  await wixData.update('disparos', {
-    _id: disparoId, status: statusFinal, totalEnviados: enviados
-  }, { suppressAuth: true });
-
-  return { ok: erros === 0, enviados, erros, total: itens.length };
 }
