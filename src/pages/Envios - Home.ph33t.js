@@ -1,7 +1,11 @@
 // Página: Disparos de Cobrança — /portal/envios (Envios - Home)
-// Elemento na página: #htmlDisparos (HtmlComponent)
-//   Src: URL do disparos.html hospedado no Wix Media Manager
-//   Protocolo: mesmo padrão do Smart Briefing (campo id para correlação)
+// Elemento: #htmlDisparos (HtmlComponent com disparos.html)
+//
+// Protocolo idêntico ao Smart Briefing:
+//   HTML → Velo: window.Wix.sendMessage({ id, type, payload })
+//              OU window.parent.postMessage({ id, type, payload }, '*')
+//   Velo → HTML: $w('#htmlDisparos').postMessage({ id, ...responseData })
+//   HTML recebe: window.addEventListener('message', e => { cb = _pending[e.data.id]; cb(e.data) })
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -32,13 +36,13 @@ $w.onReady(async () => {
 
     $w('#htmlDisparos').show();
 
-    // Mesmo padrão do Smart Briefing: { id, type, payload }
-    // reply() envia de volta incluindo o mesmo id para correlação
+    // reply({ ...data }) envia de volta para o HTML com o mesmo id
+    // O HTML resolve a Promise pendente pelo id
     $w('#htmlDisparos').onMessage(async (event) => {
       const { id, type, payload } = event.data;
       if (!type) return;
 
-      const reply = (data) => $w('#htmlDisparos').postMessage({ id, type: type + '_RESULT', ...data });
+      const reply = (data) => $w('#htmlDisparos').postMessage({ id, ...data });
 
       try {
         switch (type) {
@@ -99,12 +103,11 @@ $w.onReady(async () => {
               });
             }));
 
-            const itensComSC = itens.map(item => ({
-              ...item,
-              _sc: scMap[item.subclienteRef] || {}
-            }));
-
-            reply({ disparoId: novoDisparo._id, disparo: novoDisparo, itens: itensComSC });
+            reply({
+              disparoId: novoDisparo._id,
+              disparo: novoDisparo,
+              itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} }))
+            });
             break;
           }
 
@@ -155,13 +158,20 @@ $w.onReady(async () => {
               })
             ));
             const result = await enviarDisparos(disparoId);
-            reply({ ok: result.ok, enviados: result.enviados, erros: result.erros, total: result.total });
+            reply({
+              ok: result.ok,
+              enviados: result.enviados,
+              erros: result.erros,
+              total: result.total
+            });
             break;
           }
 
           default:
             console.warn('[Envios] Tipo de mensagem desconhecido:', type);
+            reply({ error: 'Tipo desconhecido: ' + type });
         }
+
       } catch (err) {
         console.error('[Envios] Erro no handler', type, ':', err);
         reply({ error: err.message || 'Erro interno.' });
