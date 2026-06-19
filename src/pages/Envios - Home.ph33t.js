@@ -1,12 +1,14 @@
 // Página: Disparos de Cobrança — /portal/envios (Envios - Home)
-// Elemento: #htmlDisparos (HtmlComponent)
+// Elemento: #htmlDisparos (HtmlComponent) — deve ser VISÍVEL por padrão no editor
 //
-// PROTOCOLO VELO_READY:
-//   1. HTML carrega e aguarda sinal { type: 'VELO_READY' } do Velo (não envia nada ainda)
-//   2. Velo completa auth → chama show() → envia postMessage({ type: 'VELO_READY' })
-//   3. HTML recebe VELO_READY → inicia fetchs (FETCH_DISPAROS, FETCH_SUBCLIENTES)
-//   4. Velo responde cada fetch com { id, ...data }
-//   5. HTML resolve as Promises pelo id
+// HANDSHAKE HTML_READY → VELO_READY:
+//   1. HTML carrega → envia HTML_READY (avisa que listener está ativo)
+//   2. Velo recebe HTML_READY → se auth OK → responde com VELO_READY
+//      Velo completa auth → se HTML já avisou → envia VELO_READY
+//   3. HTML recebe VELO_READY → inicia fetches
+//
+// IMPORTANTE: o #htmlDisparos deve estar VISÍVEL no Wix Editor (não "hidden on load")
+// $w().postMessage() não funciona para iframes ocultos — o bridge Wix não está ativo
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -21,14 +23,31 @@ function parseBRL(str) {
 }
 
 $w.onReady(async () => {
-  // onMessage registrado antes de qualquer await
+  let authDone = false;
+  let htmlReady = false;
+
+  function sendVeloReady() {
+    console.log('[Envios Velo] enviando VELO_READY');
+    $w('#htmlDisparos').postMessage({ type: 'VELO_READY' });
+  }
+
+  // onMessage registrado ANTES de qualquer await
   $w('#htmlDisparos').onMessage(async (event) => {
     const { id, type, payload } = event.data;
     if (!type) return;
-    console.log('[Envios Velo] onMessage:', type, 'id:', id);
+
+    console.log('[Envios Velo] onMessage:', type, id !== undefined ? 'id=' + id : '');
+
+    // Handshake: HTML avisa que está pronto para receber
+    if (type === 'HTML_READY') {
+      htmlReady = true;
+      console.log('[Envios Velo] HTML_READY recebido. authDone:', authDone);
+      if (authDone) sendVeloReady();
+      return;
+    }
 
     const reply = (data) => {
-      console.log('[Envios Velo] reply →', type);
+      console.log('[Envios Velo] reply →', type, 'id=' + id);
       $w('#htmlDisparos').postMessage({ id, ...data });
     };
 
@@ -36,20 +55,13 @@ $w.onReady(async () => {
       switch (type) {
 
         case 'FETCH_DISPAROS': {
-          const result = await wixData
-            .query('disparos')
-            .descending('_createdDate')
-            .find();
+          const result = await wixData.query('disparos').descending('_createdDate').find();
           reply({ data: result.items });
           break;
         }
 
         case 'FETCH_SUBCLIENTES': {
-          const result = await wixData
-            .query('subclientes')
-            .eq('status', 'ativo')
-            .ascending('nome')
-            .find();
+          const result = await wixData.query('subclientes').eq('status', 'ativo').ascending('nome').find();
           reply({ data: result.items });
           break;
         }
@@ -62,7 +74,7 @@ $w.onReady(async () => {
             dataVencimento: dataVencimento || null,
             textoCorpo: textoCorpo || '',
             status: 'rascunho',
-            criadoPor: event._memberId || '',
+            criadoPor: '',
             totalEnviados: 0
           });
           const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).find();
@@ -88,12 +100,11 @@ $w.onReady(async () => {
             wixData.get('disparos', disparoId),
             wixData.query('itensDisparo').eq('disparoRef', disparoId).find()
           ]);
-          const itens = itensResult.items;
-          const scIds = [...new Set(itens.map(i => i.subclienteRef))];
+          const scIds = [...new Set(itensResult.items.map(i => i.subclienteRef))];
           const scResult = scIds.length ? await wixData.query('subclientes').hasSome('_id', scIds).find() : { items: [] };
           const scMap = {};
           scResult.items.forEach(sc => { scMap[sc._id] = sc; });
-          reply({ disparo, itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
+          reply({ disparo, itens: itensResult.items.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
           break;
         }
 
@@ -140,10 +151,13 @@ $w.onReady(async () => {
       wixLocation.to('/portal'); return;
     }
 
-    // Auth OK — mostra o componente e sinaliza ao HTML que pode iniciar os fetchs
-    $w('#htmlDisparos').show();
-    $w('#htmlDisparos').postMessage({ type: 'VELO_READY' });
-    console.log('[Envios Velo] Auth OK → VELO_READY enviado');
+    authDone = true;
+    console.log('[Envios Velo] Auth OK. htmlReady:', htmlReady);
+
+    if (htmlReady) {
+      sendVeloReady();
+    }
+    // Se htmlReady = false, VELO_READY será enviado quando HTML_READY chegar
 
   } catch (err) {
     console.error('[Envios Velo] Erro na auth:', err);
