@@ -4,6 +4,10 @@
 // IMPORTANTE: campos REFERENCE (disparoRef, subclienteRef) só são escritos
 // corretamente no backend com suppressAuth: true. Por isso CREATE_DISPARO,
 // FETCH_ITENS e SALVAR_RASCUNHO chamam funções do backend.
+//
+// ATENÇÃO: wixData.query no backend pode não retornar campos REFERENCE nos itens.
+// Por isso, ENVIAR_DISPAROS constrói itemScMap (itemId → scId) a partir do
+// estado local do HTML (item._sc._id) e passa para enviarDisparos().
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -90,14 +94,22 @@ $w.onReady(async () => {
           const { disparoId, itens } = payload;
           // Salva rascunho primeiro via backend (preserva referências)
           await salvarRascunhoItens(itens);
+          // Monta mapa itemId → scId a partir do _sc local
+          // (contorna limitação: wixData.query pode não retornar campos REFERENCE)
+          const itemScMap = {};
+          itens.forEach(item => {
+            const scId = item._sc && item._sc._id;
+            if (item._id && scId) itemScMap[item._id] = scId;
+          });
           // Envia os emails
-          const result = await enviarDisparos(disparoId);
+          const result = await enviarDisparos(disparoId, itemScMap);
           reply({
             ok: result.ok,
             enviados: result.enviados || 0,
             erros: result.erros || 0,
             total: result.total || 0,
-            error: result.error || null
+            error: result.error || null,
+            _debug: result._debug || null
           });
           break;
         }
