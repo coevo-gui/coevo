@@ -1,5 +1,9 @@
 // Página: Disparos de Cobrança — /portal/envios (Envios - Home)
 // Elemento: #htmlDisparos (HtmlComponent) — visível por padrão no editor
+//
+// REGRA wixData.update: sempre buscar o item completo antes de atualizar.
+// update() com campos parciais sobrescreve o documento inteiro, apagando campos
+// como disparoRef e subclienteRef que são críticos para o funcionamento.
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -41,16 +45,19 @@ $w.onReady(async () => {
 
     try {
       switch (type) {
+
         case 'FETCH_DISPAROS': {
           const result = await wixData.query('disparos').descending('_createdDate').find();
           reply({ data: result.items });
           break;
         }
+
         case 'FETCH_SUBCLIENTES': {
           const result = await wixData.query('subclientes').eq('status', 'ativo').ascending('nome').find();
           reply({ data: result.items });
           break;
         }
+
         case 'CREATE_DISPARO': {
           const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds } = payload;
           const novoDisparo = await wixData.insert('disparos', {
@@ -78,6 +85,7 @@ $w.onReady(async () => {
             itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
           break;
         }
+
         case 'FETCH_ITENS': {
           const { disparoId } = payload;
           const [disparo, itensResult] = await Promise.all([
@@ -91,27 +99,38 @@ $w.onReady(async () => {
           reply({ disparo, itens: itensResult.items.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
           break;
         }
+
         case 'SALVAR_RASCUNHO': {
-          await Promise.all(payload.itens.map(item =>
-            wixData.update('itensDisparo', {
-              _id: item._id, valorInvestimento: item.valorInvestimento,
-              tipoPagamento: item.tipoPagamento, pixCode: item.pixCode || '', boletoUrl: item.boletoUrl || ''
-            })
-          ));
+          // Busca o item completo antes de atualizar para preservar disparoRef e subclienteRef
+          await Promise.all(payload.itens.map(async (item) => {
+            const existing = await wixData.get('itensDisparo', item._id);
+            return wixData.update('itensDisparo', {
+              ...existing,
+              valorInvestimento: item.valorInvestimento,
+              tipoPagamento: item.tipoPagamento,
+              pixCode: item.pixCode || '',
+              boletoUrl: item.boletoUrl || ''
+            });
+          }));
           reply({ ok: true });
           break;
         }
+
         case 'ENVIAR_DISPAROS': {
           const { disparoId, itens } = payload;
-          // Salva os dados do formulário antes de enviar
-          await Promise.all(itens.map(item =>
-            wixData.update('itensDisparo', {
-              _id: item._id, valorInvestimento: item.valorInvestimento,
-              tipoPagamento: item.tipoPagamento, pixCode: item.pixCode || '', boletoUrl: item.boletoUrl || ''
-            })
-          ));
+          // Busca o item completo antes de atualizar para preservar disparoRef e subclienteRef
+          // update() com dados parciais sobrescreve o documento inteiro no Wix
+          await Promise.all(itens.map(async (item) => {
+            const existing = await wixData.get('itensDisparo', item._id);
+            return wixData.update('itensDisparo', {
+              ...existing,
+              valorInvestimento: item.valorInvestimento,
+              tipoPagamento: item.tipoPagamento,
+              pixCode: item.pixCode || '',
+              boletoUrl: item.boletoUrl || ''
+            });
+          }));
           const result = await enviarDisparos(disparoId);
-          // Propaga result.error se presente (backend retorna em vez de throw)
           reply({
             ok: result.ok,
             enviados: result.enviados || 0,
@@ -121,6 +140,7 @@ $w.onReady(async () => {
           });
           break;
         }
+
         default:
           reply({ error: 'Tipo desconhecido: ' + type });
       }
@@ -130,7 +150,7 @@ $w.onReady(async () => {
     }
   });
 
-  // AUTH com logs granulares
+  // AUTH
   try {
     console.log('[Envios Velo] [1] chamando getMember()...');
     const member = await currentMember.getMember({ fieldsets: ['FULL'] });
