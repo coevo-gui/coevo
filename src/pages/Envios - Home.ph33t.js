@@ -1,25 +1,24 @@
 // Página: Disparos de Cobrança — /portal/envios (Envios - Home)
 // Elemento: #htmlDisparos (HtmlComponent) — visível por padrão no editor
 //
-// REGRA wixData.update: sempre buscar o item completo antes de atualizar.
-// update() com campos parciais sobrescreve o documento inteiro, apagando campos
-// como disparoRef e subclienteRef que são críticos para o funcionamento.
+// IMPORTANTE: campos REFERENCE (disparoRef, subclienteRef) só são escritos
+// corretamente no backend com suppressAuth: true. Por isso CREATE_DISPARO,
+// FETCH_ITENS e SALVAR_RASCUNHO chamam funções do backend.
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
-import { enviarDisparos } from 'backend/emailDisparo.jsw';
-
-function parseBRL(str) {
-  if (!str) return 0;
-  return parseFloat(
-    String(str).replace('R$', '').replace(/\./g, '').replace(',', '.').trim()
-  ) || 0;
-}
+import {
+  criarDisparoComItens,
+  fetchItensDisparo,
+  salvarRascunhoItens,
+  enviarDisparos
+} from 'backend/emailDisparo.jsw';
 
 $w.onReady(async () => {
   let authDone = false;
   let htmlReady = false;
+  let memberEmail = '';
 
   function sendVeloReady() {
     console.log('[Envios Velo] postMessage VELO_READY →');
@@ -59,77 +58,39 @@ $w.onReady(async () => {
         }
 
         case 'CREATE_DISPARO': {
-          const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds } = payload;
-          const novoDisparo = await wixData.insert('disparos', {
-            titulo, plataforma,
-            mesReferencia: mesReferencia || null,
-            dataVencimento: dataVencimento || null,
-            textoCorpo: textoCorpo || '',
-            status: 'rascunho',
-            criadoPor: '',
-            totalEnviados: 0
-          });
-          const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).find();
-          const scMap = {};
-          scResult.items.forEach(sc => { scMap[sc._id] = sc; });
-          const itens = await Promise.all(subclienteIds.map(scId => {
-            const sc = scMap[scId] || {};
-            const valor = plataforma === 'mads' ? parseBRL(sc.valorMidiaMeta) : parseBRL(sc.valorMidiaGoogle);
-            return wixData.insert('itensDisparo', {
-              disparoRef: novoDisparo._id, subclienteRef: scId,
-              valorInvestimento: valor || 0, tipoPagamento: 'boleto',
-              pixCode: '', boletoUrl: '', statusEnvio: 'pendente'
-            });
-          }));
-          reply({ disparoId: novoDisparo._id, disparo: novoDisparo,
-            itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
+          // Chama backend para salvar referências corretamente
+          const result = await criarDisparoComItens({ ...payload, criadoPor: memberEmail });
+          if (result.ok) {
+            reply({ disparoId: result.disparoId, disparo: result.disparo, itens: result.itens });
+          } else {
+            reply({ error: result.error });
+          }
           break;
         }
 
         case 'FETCH_ITENS': {
-          const { disparoId } = payload;
-          const [disparo, itensResult] = await Promise.all([
-            wixData.get('disparos', disparoId),
-            wixData.query('itensDisparo').eq('disparoRef', disparoId).find()
-          ]);
-          const scIds = [...new Set(itensResult.items.map(i => i.subclienteRef))];
-          const scResult = scIds.length ? await wixData.query('subclientes').hasSome('_id', scIds).find() : { items: [] };
-          const scMap = {};
-          scResult.items.forEach(sc => { scMap[sc._id] = sc; });
-          reply({ disparo, itens: itensResult.items.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} })) });
+          // Chama backend para ler com suppressAuth (garante leitura das referências)
+          const result = await fetchItensDisparo(payload.disparoId);
+          if (result.ok) {
+            reply({ disparo: result.disparo, itens: result.itens });
+          } else {
+            reply({ error: result.error });
+          }
           break;
         }
 
         case 'SALVAR_RASCUNHO': {
-          // Busca o item completo antes de atualizar para preservar disparoRef e subclienteRef
-          await Promise.all(payload.itens.map(async (item) => {
-            const existing = await wixData.get('itensDisparo', item._id);
-            return wixData.update('itensDisparo', {
-              ...existing,
-              valorInvestimento: item.valorInvestimento,
-              tipoPagamento: item.tipoPagamento,
-              pixCode: item.pixCode || '',
-              boletoUrl: item.boletoUrl || ''
-            });
-          }));
-          reply({ ok: true });
+          // Chama backend para preservar disparoRef e subclienteRef no update
+          const result = await salvarRascunhoItens(payload.itens);
+          reply({ ok: result.ok, error: result.error || null });
           break;
         }
 
         case 'ENVIAR_DISPAROS': {
           const { disparoId, itens } = payload;
-          // Busca o item completo antes de atualizar para preservar disparoRef e subclienteRef
-          // update() com dados parciais sobrescreve o documento inteiro no Wix
-          await Promise.all(itens.map(async (item) => {
-            const existing = await wixData.get('itensDisparo', item._id);
-            return wixData.update('itensDisparo', {
-              ...existing,
-              valorInvestimento: item.valorInvestimento,
-              tipoPagamento: item.tipoPagamento,
-              pixCode: item.pixCode || '',
-              boletoUrl: item.boletoUrl || ''
-            });
-          }));
+          // Salva rascunho primeiro via backend (preserva referências)
+          await salvarRascunhoItens(itens);
+          // Envia os emails
           const result = await enviarDisparos(disparoId);
           reply({
             ok: result.ok,
@@ -157,8 +118,9 @@ $w.onReady(async () => {
     console.log('[Envios Velo] [2] getMember OK. member:', member ? member._id : 'null');
 
     if (!member) { wixLocation.to('/login'); return; }
+    memberEmail = member.loginEmail || '';
 
-    console.log('[Envios Velo] [3] consultando acessoUsuario para memberId:', member._id);
+    console.log('[Envios Velo] [3] consultando acessoUsuario...');
     const acesso = await wixData.query('acessoUsuario').eq('memberId', member._id).find();
     console.log('[Envios Velo] [4] acesso.items.length:', acesso.items.length);
 

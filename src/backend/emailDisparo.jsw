@@ -1,6 +1,7 @@
 // Web Method — Disparos de Cobrança
-// NUNCA throw fora de try/catch — retorna { ok, error } para o erro chegar legível
-// Mesmo padrão do briefing.jsw
+// IMPORTANTE: campos REFERENCE (disparoRef, subclienteRef) só são salvos corretamente
+// no backend com suppressAuth: true. No frontend, wixData.insert/update silenciosamente
+// descarta campos de referência. Por isso CREATE_DISPARO e SALVAR_RASCUNHO são backend.
 
 import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
@@ -8,10 +9,104 @@ import wixData from 'wix-data';
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
 const REMETENTE = { name: 'Mídia Coevo', email: 'midia@coevo.co' };
 
-function formatarBRL(n) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n || 0);
+function parseBRL(str) {
+  if (!str) return 0;
+  return parseFloat(
+    String(str).replace('R$', '').replace(/\./g, '').replace(',', '.').trim()
+  ) || 0;
 }
 
+// ─── Criar disparo + itens no backend (necessário para salvar campos REFERENCE) ─
+export async function criarDisparoComItens(payload) {
+  try {
+    const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds, criadoPor } = payload;
+
+    const novoDisparo = await wixData.insert('disparos', {
+      titulo, plataforma,
+      mesReferencia: mesReferencia || null,
+      dataVencimento: dataVencimento || null,
+      textoCorpo: textoCorpo || '',
+      status: 'rascunho',
+      criadoPor: criadoPor || '',
+      totalEnviados: 0
+    }, { suppressAuth: true });
+
+    const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).find({ suppressAuth: true });
+    const scMap = {};
+    scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+
+    const itens = await Promise.all(subclienteIds.map(scId => {
+      const sc = scMap[scId] || {};
+      const valor = plataforma === 'mads' ? parseBRL(sc.valorMidiaMeta) : parseBRL(sc.valorMidiaGoogle);
+      return wixData.insert('itensDisparo', {
+        disparoRef: novoDisparo._id,
+        subclienteRef: scId,
+        valorInvestimento: valor || 0,
+        tipoPagamento: 'boleto',
+        pixCode: '',
+        boletoUrl: '',
+        statusEnvio: 'pendente'
+      }, { suppressAuth: true });
+    }));
+
+    return {
+      ok: true,
+      disparoId: novoDisparo._id,
+      disparo: novoDisparo,
+      itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} }))
+    };
+  } catch (err) {
+    console.error('[emailDisparo] criarDisparoComItens erro:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Buscar itens de um disparo no backend ────────────────────────────────────
+export async function fetchItensDisparo(disparoId) {
+  try {
+    const [disparo, itensResult] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.query('itensDisparo').eq('disparoRef', disparoId).find({ suppressAuth: true })
+    ]);
+    const itens = itensResult.items;
+    const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
+    const scResult = scIds.length
+      ? await wixData.query('subclientes').hasSome('_id', scIds).find({ suppressAuth: true })
+      : { items: [] };
+    const scMap = {};
+    scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+    return {
+      ok: true,
+      disparo,
+      itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} }))
+    };
+  } catch (err) {
+    console.error('[emailDisparo] fetchItensDisparo erro:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Salvar rascunho (atualizar campos editáveis preservando referências) ─────
+export async function salvarRascunhoItens(itens) {
+  try {
+    await Promise.all(itens.map(async (item) => {
+      const existing = await wixData.get('itensDisparo', item._id, { suppressAuth: true });
+      return wixData.update('itensDisparo', {
+        ...existing,
+        valorInvestimento: item.valorInvestimento,
+        tipoPagamento: item.tipoPagamento,
+        pixCode: item.pixCode || '',
+        boletoUrl: item.boletoUrl || ''
+      }, { suppressAuth: true });
+    }));
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] salvarRascunhoItens erro:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Enviar emails de cobrança ────────────────────────────────────────────────
 function buildAssunto(disparo, sc) {
   const dataRef = disparo.mesReferencia
     ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
@@ -21,7 +116,7 @@ function buildAssunto(disparo, sc) {
 }
 
 function buildHtml(disparo, item, sc) {
-  const valor = formatarBRL(item.valorInvestimento);
+  const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
   const venc = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '—';
   const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS', ambas: 'GOOGLE ADS e META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
   const blocoPagamento = item.tipoPagamento === 'pix'
@@ -60,21 +155,20 @@ function buildHtml(disparo, item, sc) {
 export async function enviarDisparos(disparoId) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
-    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager', step: 1 };
-
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
     const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
 
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
-    if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId, step: 2 };
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
 
     const itensResult = await wixData
       .query('itensDisparo')
       .eq('disparoRef', disparoId)
       .find({ suppressAuth: true });
     const itens = itensResult.items;
-    if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId, step: 3 };
+    if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
 
-    const scIds = [...new Set(itens.map(i => i.subclienteRef))];
+    const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
     const scResult = await wixData.query('subclientes').hasSome('_id', scIds).find({ suppressAuth: true });
     const scMap = {};
     scResult.items.forEach(sc => { scMap[sc._id] = sc; });
@@ -125,7 +219,6 @@ export async function enviarDisparos(disparoId) {
     return { ok: erros === 0, enviados, erros, total: itens.length };
 
   } catch (err) {
-    // Retorna o erro como valor — nunca deixa o Wix converter em "Unable to handle the request"
     console.error('[emailDisparo] erro:', err.message || err);
     return { ok: false, error: err.message || String(err) };
   }
