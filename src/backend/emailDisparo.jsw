@@ -7,7 +7,7 @@ import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
-const REMETENTE = { name: 'Mídia Coevo', email: 'midia@coevo.co' };
+const REMETENTE = { name: 'Mídia coevo', email: 'midia@coevo.co' };
 // Logo para fundo branco (300x93px)
 const LOGO_URL = 'https://static.wixstatic.com/media/9653d9_9568c16de9094b8f933964c0cefedaa2~mv2.png';
 
@@ -32,8 +32,8 @@ function resolverDestinatarios(sc, destinatarios = {}) {
   };
   const to = [];
   if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   to.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
-  if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) to.push({ email: sc.emailGerenteGeral, name: sc.nome });
-  if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     to.push({ email: sc.focalMktEmail,    name: sc.nome });
+  if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) to.push({ email: sc.emailGerenteGeral, name: sc.contatoGerenteGeral || sc.nome });
+  if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     to.push({ email: sc.focalMktEmail,    name: sc.focalMktContato || sc.nome });
 
   const cc = [];
   if (dest.copia && sc.emailsCopia) {
@@ -132,6 +132,7 @@ export async function fetchItensDisparo(disparoId) {
 // ─── Salvar rascunho ────────────────────────────────────────────────
 export async function salvarRascunhoItens(itens) {
   try {
+    if (!itens.length) return { ok: true };
     await Promise.all(itens.map(async (item) => {
       const existing = await wixData.get('itensDisparo', item._id, { suppressAuth: true });
       return wixData.update('itensDisparo', {
@@ -142,6 +143,14 @@ export async function salvarRascunhoItens(itens) {
         boletoUrl: item.boletoUrl || ''
       }, { suppressAuth: true });
     }));
+    // Toca o disparo pai para forçar _updatedDate a atualizar
+    try {
+      const primeiroItem = await wixData.get('itensDisparo', itens[0]._id, { suppressAuth: true }).catch(() => null);
+      if (primeiroItem && primeiroItem.disparoRef) {
+        const disp = await wixData.get('disparos', primeiroItem.disparoRef, { suppressAuth: true }).catch(() => null);
+        if (disp) await wixData.update('disparos', disp, { suppressAuth: true });
+      }
+    } catch (_) { /* não crítico */ }
     return { ok: true };
   } catch (err) {
     console.error('[emailDisparo] salvarRascunhoItens:', err.message || err);
@@ -177,15 +186,28 @@ function buildAssunto(disparo, sc) {
   const dataRef = disparo.mesReferencia
     ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
-  const plat = { gads: 'Google Ads', mads: 'Meta Ads', ambas: 'Google Ads e Meta Ads' }[disparo.plataforma] || disparo.plataforma || '';
-  return `COEVO | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
+  const plat = { gads: 'Google Ads', mads: 'Meta Ads', comunicado: 'Comunicado' }[disparo.plataforma] || disparo.plataforma || '';
+  if (disparo.plataforma === 'comunicado') {
+    return `coevo | ${sc.sigla} | ${sc.nome} | ${disparo.titulo || 'Comunicado'}`;
+  }
+  return `coevo | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
 }
 
 function buildHtml(disparo, item, sc) {
   const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
   const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
-  const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS', ambas: 'GOOGLE ADS e META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
-  const textoCorpo = disparo.textoCorpo || `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`;
+  const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
+  const textoCorpo = disparo.textoCorpo || (disparo.plataforma === 'comunicado'
+    ? ''
+    : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
+
+  // Saudação personalizada: usa o nome do contato financeiro com fallback neutro
+  const nomeContato = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
+  const saudacao = nomeContato
+    ? `Oi, ${nomeContato}! Como vai? Por aqui, tudo bem.`
+    : `Prezado(a) Parceiro COEVO,`;
+
+  const isComunicado = disparo.plataforma === 'comunicado';
 
   const blocoPagamento = item.tipoPagamento === 'pix'
     ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p>
@@ -193,25 +215,7 @@ function buildHtml(disparo, item, sc) {
     : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p>
        <a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
 
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif">
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5">
-<tr><td align="center" style="padding:32px 16px">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)">
-
-    <!-- HEADER -->
-    <tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff">
-      <img src="${LOGO_URL}" alt="Coevo" width="180" style="display:inline-block;max-width:180px;height:auto">
-    </td></tr>
-
-    <!-- BODY -->
-    <tr><td style="padding:32px 36px 28px">
-      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">Bom dia,</p>
-      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">Prezado(a) Parceiro COEVO,</p>
-      <p style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpo}</p>
-
+  const blocoCobranca = isComunicado ? '' : `
       <!-- Billing info card -->
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px">
         <tr><td style="padding:20px 24px">
@@ -245,7 +249,26 @@ function buildHtml(disparo, item, sc) {
       <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">
         Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado,
         para evitar que a conta fique sem saldo.
-      </p>
+      </p>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5">
+<tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)">
+
+    <!-- HEADER -->
+    <tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff">
+      <img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto">
+    </td></tr>
+
+    <!-- BODY -->
+    <tr><td style="padding:32px 36px 28px">
+      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p>
+      <p style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpo}</p>
+      ${blocoCobranca}
       <p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p>
       <p style="margin:0;color:#0a0a1a;font-size:14px">
         Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a>
@@ -255,7 +278,7 @@ function buildHtml(disparo, item, sc) {
     <!-- FOOTER -->
     <tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center">
       <p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">
-        &copy; Coevo &middot; Marketing de Hotelaria &middot;
+        &copy; coevo &middot; conectando vidas &amp; lugares &middot;
         <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a>
         &middot;
         <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a>
@@ -270,7 +293,6 @@ function buildHtml(disparo, item, sc) {
 }
 
 // ─── Preview de um email (sem enviar) ───────────────────────────────
-// itemDraft: { valorInvestimento, tipoPagamento, pixCode, boletoUrl } (valores atuais da tela)
 export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}) {
   try {
     const [disparo, sc] = await Promise.all([
@@ -300,11 +322,15 @@ export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinat
   }
 }
 
-// ─── Enviar email de TESTE para um endereço digitado ────────────────
-// Envia APENAS para emailTeste, com prefixo [TESTE]. Não altera statusEnvio.
-export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailTeste = '') {
+// ─── Enviar email de TESTE para endereços digitados ────────────────
+// Envia APENAS para emailsTeste (array), com prefixo [TESTE]. Não altera statusEnvio.
+export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTeste = []) {
   try {
-    if (!isValidEmail(emailTeste)) return { ok: false, error: 'Email de teste inválido.' };
+    // Aceita string (legado) ou array
+    const emails = Array.isArray(emailsTeste)
+      ? emailsTeste.filter(isValidEmail)
+      : String(emailsTeste).split(/[,;\s]+/).map(e => e.trim()).filter(isValidEmail);
+    if (!emails.length) return { ok: false, error: 'Nenhum email de teste válido.' };
 
     const brevoKey = await getSecret('BREVO_API_KEY');
     if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia.' };
@@ -325,7 +351,7 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailTest
 
     const emailPayload = {
       sender: REMETENTE,
-      to: [{ email: emailTeste, name: 'Teste Coevo' }],
+      to: emails.map(email => ({ email, name: 'Teste coevo' })),
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
     };
