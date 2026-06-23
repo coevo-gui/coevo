@@ -201,8 +201,9 @@ function buildHtml(disparo, item, sc) {
     ? ''
     : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
 
-  // Saudação personalizada: usa o nome do contato financeiro com fallback neutro
-  const nomeContato = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
+  // Saudação personalizada: usa apenas o primeiro nome do contato com fallback neutro
+  const nomeCompleto = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
+  const nomeContato = nomeCompleto ? nomeCompleto.trim().split(' ')[0] : '';
   const saudacao = nomeContato
     ? `Oi, ${nomeContato}! Como vai? Por aqui, tudo bem.`
     : `Prezado(a) Parceiro COEVO,`;
@@ -326,7 +327,6 @@ export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinat
 // Envia APENAS para emailsTeste (array), com prefixo [TESTE]. Não altera statusEnvio.
 export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTeste = []) {
   try {
-    // Aceita string (legado) ou array
     const emails = Array.isArray(emailsTeste)
       ? emailsTeste.filter(isValidEmail)
       : String(emailsTeste).split(/[,;\s]+/).map(e => e.trim()).filter(isValidEmail);
