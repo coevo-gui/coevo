@@ -86,13 +86,19 @@ $w.onReady(async () => {
         }
 
         case 'PREVIEW_EMAIL': {
-          const result = await previewEmailItem(payload.disparoId, payload.scId, payload.itemDraft, payload.destinatarios || {});
+          // corpoDraft: texto atual do inputCorpo na tela, pode diferir do CMS se ainda não foi salvo
+          const result = await previewEmailItem(
+            payload.disparoId,
+            payload.scId,
+            payload.itemDraft,
+            payload.destinatarios || {},
+            payload.corpoDraft || null
+          );
           reply({ ok: result.ok, html: result.html, assunto: result.assunto, to: result.to, cc: result.cc, error: result.error || null });
           break;
         }
 
         case 'ENVIAR_TESTE': {
-          // emailsTeste é array; suporta também string legado via emailTeste
           const emails = payload.emailsTeste || (payload.emailTeste ? [payload.emailTeste] : []);
           const result = await enviarTesteItem(payload.disparoId, payload.scId, payload.itemDraft, emails);
           reply({ ok: result.ok, error: result.error || null });
