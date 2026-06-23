@@ -59,7 +59,7 @@ export async function criarDisparoComItens(payload) {
       totalEnviados: 0
     }, { suppressAuth: true });
 
-    const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).find({ suppressAuth: true });
+    const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).limit(1000).find({ suppressAuth: true });
     const scMap = {};
     scResult.items.forEach(sc => { scMap[sc._id] = sc; });
 
@@ -94,12 +94,12 @@ export async function fetchItensDisparo(disparoId) {
   try {
     const [disparo, itensResult] = await Promise.all([
       wixData.get('disparos', disparoId, { suppressAuth: true }),
-      wixData.query('itensDisparo').eq('disparoRef', disparoId).find({ suppressAuth: true })
+      wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true })
     ]);
     const itens = itensResult.items;
     const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
     const scResult = scIds.length
-      ? await wixData.query('subclientes').hasSome('_id', scIds).find({ suppressAuth: true })
+      ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true })
       : { items: [] };
     const scMap = {};
     scResult.items.forEach(sc => { scMap[sc._id] = sc; });
@@ -140,6 +140,7 @@ export async function deletarDisparo(disparoId) {
     const itensResult = await wixData
       .query('itensDisparo')
       .eq('disparoRef', disparoId)
+      .limit(1000)
       .find({ suppressAuth: true });
 
     await Promise.all(
@@ -338,6 +339,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const itensResult = await wixData
       .query('itensDisparo')
       .eq('disparoRef', disparoId)
+      .limit(1000)
       .find({ suppressAuth: true });
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
