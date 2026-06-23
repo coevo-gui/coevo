@@ -9,7 +9,9 @@ import {
   fetchItensDisparo,
   salvarRascunhoItens,
   enviarDisparos,
-  deletarDisparo
+  deletarDisparo,
+  previewEmailItem,
+  enviarTesteItem
 } from 'backend/emailDisparo.jsw';
 
 $w.onReady(async () => {
@@ -76,11 +78,21 @@ $w.onReady(async () => {
           break;
         }
 
+        case 'PREVIEW_EMAIL': {
+          const result = await previewEmailItem(payload.disparoId, payload.scId, payload.itemDraft, payload.destinatarios || {});
+          reply({ ok: result.ok, html: result.html, assunto: result.assunto, to: result.to, cc: result.cc, error: result.error || null });
+          break;
+        }
+
+        case 'ENVIAR_TESTE': {
+          const result = await enviarTesteItem(payload.disparoId, payload.scId, payload.itemDraft, payload.emailTeste);
+          reply({ ok: result.ok, error: result.error || null });
+          break;
+        }
+
         case 'ENVIAR_DISPAROS': {
           const { disparoId, itens, destinatarios } = payload;
           await salvarRascunhoItens(itens);
-          // Monta mapa itemId → scId a partir do _sc local
-          // (contorna: wixData.query pode não retornar campos REFERENCE)
           const itemScMap = {};
           itens.forEach(item => {
             const scId = item._sc && item._sc._id;

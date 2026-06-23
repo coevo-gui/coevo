@@ -22,6 +22,28 @@ function isValidEmail(e) {
   return e && typeof e === 'string' && e.includes('@') && e !== 'N/A';
 }
 
+// Resolve a lista de destinatários (to + cc) de um subcliente conforme as escolhas
+function resolverDestinatarios(sc, destinatarios = {}) {
+  const dest = {
+    financeiro:   destinatarios.financeiro   !== false,
+    gerenteGeral: destinatarios.gerenteGeral !== false,
+    focalMkt:     destinatarios.focalMkt     !== false,
+    copia:        destinatarios.copia        !== false
+  };
+  const to = [];
+  if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   to.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
+  if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) to.push({ email: sc.emailGerenteGeral, name: sc.nome });
+  if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     to.push({ email: sc.focalMktEmail,    name: sc.nome });
+
+  const cc = [];
+  if (dest.copia && sc.emailsCopia) {
+    sc.emailsCopia.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
+      if (!to.some(t => t.email === email)) cc.push({ email });
+    });
+  }
+  return { to, cc };
+}
+
 // ─── Criar disparo + itens no backend ────────────────────────────────
 export async function criarDisparoComItens(payload) {
   try {
@@ -231,15 +253,80 @@ function buildHtml(disparo, item, sc) {
 </html>`;
 }
 
-// ─── Enviar emails ───────────────────────────────────────────────────
-export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = {}) {
-  const dest = {
-    financeiro:   destinatarios.financeiro   !== false,
-    gerenteGeral: destinatarios.gerenteGeral !== false,
-    focalMkt:     destinatarios.focalMkt     !== false,
-    copia:        destinatarios.copia        !== false
-  };
+// ─── Preview de um email (sem enviar) ───────────────────────────────
+// itemDraft: { valorInvestimento, tipoPagamento, pixCode, boletoUrl } (valores atuais da tela)
+export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}) {
+  try {
+    const [disparo, sc] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.get('subclientes', scId, { suppressAuth: true })
+    ]);
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
+    if (!sc) return { ok: false, error: 'Subcliente não encontrado.' };
 
+    const item = {
+      valorInvestimento: itemDraft.valorInvestimento || 0,
+      tipoPagamento: itemDraft.tipoPagamento || 'boleto',
+      pixCode: itemDraft.pixCode || '',
+      boletoUrl: itemDraft.boletoUrl || ''
+    };
+    const { to, cc } = resolverDestinatarios(sc, destinatarios);
+    return {
+      ok: true,
+      html: buildHtml(disparo, item, sc),
+      assunto: buildAssunto(disparo, sc),
+      to: to.map(t => t.email),
+      cc: cc.map(c => c.email)
+    };
+  } catch (err) {
+    console.error('[emailDisparo] previewEmailItem:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Enviar email de TESTE para um endereço digitado ────────────────
+// Envia APENAS para emailTeste, com prefixo [TESTE]. Não altera statusEnvio.
+export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailTeste = '') {
+  try {
+    if (!isValidEmail(emailTeste)) return { ok: false, error: 'Email de teste inválido.' };
+
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia.' };
+    const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
+
+    const [disparo, sc] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.get('subclientes', scId, { suppressAuth: true })
+    ]);
+    if (!disparo || !sc) return { ok: false, error: 'Dados não encontrados.' };
+
+    const item = {
+      valorInvestimento: itemDraft.valorInvestimento || 0,
+      tipoPagamento: itemDraft.tipoPagamento || 'boleto',
+      pixCode: itemDraft.pixCode || '',
+      boletoUrl: itemDraft.boletoUrl || ''
+    };
+
+    const emailPayload = {
+      sender: REMETENTE,
+      to: [{ email: emailTeste, name: 'Teste Coevo' }],
+      subject: '[TESTE] ' + buildAssunto(disparo, sc),
+      htmlContent: buildHtml(disparo, item, sc)
+    };
+
+    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
+    if (res.ok) return { ok: true };
+    const errText = await res.text();
+    console.error('[emailDisparo] enviarTesteItem Brevo', res.status, errText);
+    return { ok: false, error: 'Brevo ' + res.status };
+  } catch (err) {
+    console.error('[emailDisparo] enviarTesteItem:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Enviar emails (REAL) ───────────────────────────────────────────
+export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = {}) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
     if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
@@ -282,17 +369,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         continue;
       }
 
-      const toEmails = [];
-      if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   toEmails.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
-      if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) toEmails.push({ email: sc.emailGerenteGeral, name: sc.nome });
-      if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     toEmails.push({ email: sc.focalMktEmail,    name: sc.nome });
-
-      const ccEmails = [];
-      if (dest.copia && sc.emailsCopia) {
-        sc.emailsCopia.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
-          if (!toEmails.some(t => t.email === email)) ccEmails.push({ email });
-        });
-      }
+      const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
 
       if (!toEmails.length) {
         console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
