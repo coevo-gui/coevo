@@ -167,9 +167,15 @@ function buildHtml(disparo, item, sc) {
   const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
   const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
   const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
+
   const textoCorpo = disparo.textoCorpo || (disparo.plataforma === 'comunicado'
     ? ''
     : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
+
+  // Converte plain text legado (sem tags HTML) para HTML; HTML do rich editor é usado direto
+  const textoCorpoHtml = textoCorpo && !textoCorpo.includes('<')
+    ? textoCorpo.split(/\n\n+/).map(p => '<p style="margin:0 0 12px">' + p.replace(/\n/g, '<br>') + '</p>').join('')
+    : textoCorpo;
 
   const nomeCompleto = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
   const nomeContato = nomeCompleto ? nomeCompleto.trim().split(' ')[0] : '';
@@ -216,7 +222,7 @@ function buildHtml(disparo, item, sc) {
     </td></tr>
     <tr><td style="padding:32px 36px 28px">
       <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p>
-      <p style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpo}</p>
+      <div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>
       ${blocoCobranca}
       <p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p>
       <p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p>
@@ -236,8 +242,6 @@ function buildHtml(disparo, item, sc) {
 </html>`;
 }
 
-// ─── Preview de um email (sem enviar) ───────────────────────────────
-// corpoDraft: texto atual no DOM (pode diferir do CMS se ainda não foi salvo)
 export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}, corpoDraft = null) {
   try {
     const [disparo, sc] = await Promise.all([
@@ -246,12 +250,9 @@ export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinat
     ]);
     if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
     if (!sc) return { ok: false, error: 'Subcliente não encontrado.' };
-
-    // corpoDraft sobrescreve textoCorpo do CMS quando presente
     const disparoComCorpo = (corpoDraft !== null && corpoDraft !== undefined)
       ? { ...disparo, textoCorpo: corpoDraft }
       : disparo;
-
     const item = {
       valorInvestimento: itemDraft.valorInvestimento || 0,
       tipoPagamento: itemDraft.tipoPagamento || 'boleto',
@@ -272,38 +273,32 @@ export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinat
   }
 }
 
-// ─── Enviar email de TESTE ────────────────────────────────────────
 export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTeste = []) {
   try {
     const emails = Array.isArray(emailsTeste)
       ? emailsTeste.filter(isValidEmail)
       : String(emailsTeste).split(/[,;\s]+/).map(e => e.trim()).filter(isValidEmail);
     if (!emails.length) return { ok: false, error: 'Nenhum email de teste válido.' };
-
     const brevoKey = await getSecret('BREVO_API_KEY');
     if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia.' };
     const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
-
     const [disparo, sc] = await Promise.all([
       wixData.get('disparos', disparoId, { suppressAuth: true }),
       wixData.get('subclientes', scId, { suppressAuth: true })
     ]);
     if (!disparo || !sc) return { ok: false, error: 'Dados não encontrados.' };
-
     const item = {
       valorInvestimento: itemDraft.valorInvestimento || 0,
       tipoPagamento: itemDraft.tipoPagamento || 'boleto',
       pixCode: itemDraft.pixCode || '',
       boletoUrl: itemDraft.boletoUrl || ''
     };
-
     const emailPayload = {
       sender: REMETENTE,
       to: emails.map(email => ({ email, name: 'Teste coevo' })),
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
     };
-
     const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
     if (res.ok) return { ok: true };
     const errText = await res.text();
@@ -315,33 +310,26 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTes
   }
 }
 
-// ─── Enviar emails (REAL) ───────────────────────────────────────────
 export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = {}) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
     if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
     const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
-
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
-
     const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
-
     const scIds = [...new Set(itens.map(item => itemScMap[item._id] || item.subclienteRef))].filter(Boolean);
     const scArr = scIds.length
       ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null)))
       : [];
     const scMap = {};
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
-
     let enviados = 0, erros = 0;
-
     for (const item of itens) {
       const scId = itemScMap[item._id] || item.subclienteRef;
       const sc = scMap[scId];
-
       if (!sc) {
         console.warn('[emailDisparo] subcliente não encontrado. scId:', scId);
         erros++;
@@ -349,9 +337,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
         continue;
       }
-
       const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
-
       if (!toEmails.length) {
         console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
         erros++;
@@ -359,7 +345,6 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
         continue;
       }
-
       const emailPayload = {
         sender: REMETENTE,
         to: toEmails,
@@ -367,7 +352,6 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         subject: buildAssunto(disparo, sc),
         htmlContent: buildHtml(disparo, item, sc)
       };
-
       try {
         const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
@@ -385,12 +369,10 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         erros++;
       }
     }
-
     const ed = await wixData.get('disparos', disparoId, { suppressAuth: true });
     const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
     await wixData.update('disparos', { ...ed, status: statusFinal, totalEnviados: enviados }, { suppressAuth: true });
     return { ok: erros === 0, enviados, erros, total: itens.length };
-
   } catch (err) {
     console.error('[emailDisparo] erro:', err.message || err);
     return { ok: false, error: err.message || String(err) };
