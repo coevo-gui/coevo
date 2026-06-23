@@ -44,6 +44,21 @@ function resolverDestinatarios(sc, destinatarios = {}) {
   return { to, cc };
 }
 
+// ─── Listar disparos + contagem de itens (coluna Hotéis) ──────────
+export async function fetchDisparos() {
+  try {
+    const result = await wixData.query('disparos').descending('_createdDate').limit(1000).find({ suppressAuth: true });
+    const disparos = result.items;
+    const counts = await Promise.all(disparos.map(d =>
+      wixData.query('itensDisparo').eq('disparoRef', d._id).count({ suppressAuth: true }).catch(() => 0)
+    ));
+    return { ok: true, data: disparos.map((d, i) => ({ ...d, _totalItens: counts[i] })) };
+  } catch (err) {
+    console.error('[emailDisparo] fetchDisparos:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
 // ─── Criar disparo + itens no backend ────────────────────────────────
 export async function criarDisparoComItens(payload) {
   try {

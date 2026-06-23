@@ -5,6 +5,7 @@ import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
 import {
+  fetchDisparos,
   criarDisparoComItens,
   fetchItensDisparo,
   salvarRascunhoItens,
@@ -41,8 +42,8 @@ $w.onReady(async () => {
       switch (type) {
 
         case 'FETCH_DISPAROS': {
-          const result = await wixData.query('disparos').descending('_createdDate').limit(1000).find();
-          reply({ data: result.items });
+          const result = await fetchDisparos();
+          reply({ data: result.data || [], error: result.error || null });
           break;
         }
 
