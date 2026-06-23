@@ -1,6 +1,4 @@
 // Página: Disparos de Cobrança — /portal/envios (Envios - Home)
-// Elemento: #htmlDisparos (HtmlComponent) — visível por padrão no editor
-
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
 import wixLocation from 'wix-location';
@@ -9,6 +7,7 @@ import {
   criarDisparoComItens,
   fetchItensDisparo,
   salvarRascunhoItens,
+  atualizarDisparoConfig,
   enviarDisparos,
   deletarDisparo,
   previewEmailItem,
@@ -85,8 +84,13 @@ $w.onReady(async () => {
           break;
         }
 
+        case 'ATUALIZAR_DISPARO': {
+          const result = await atualizarDisparoConfig(payload.disparoId, payload.config || {});
+          reply({ ok: result.ok, error: result.error || null });
+          break;
+        }
+
         case 'PREVIEW_EMAIL': {
-          // corpoDraft: texto atual do inputCorpo na tela, pode diferir do CMS se ainda não foi salvo
           const result = await previewEmailItem(
             payload.disparoId,
             payload.scId,
@@ -139,16 +143,13 @@ $w.onReady(async () => {
     }
   });
 
-  // AUTH
   try {
     const member = await currentMember.getMember({ fieldsets: ['FULL'] });
     if (!member) { wixLocation.to('/login'); return; }
     memberEmail = member.loginEmail || '';
-
     const acesso = await wixData.query('acessoUsuario').eq('memberId', member._id).find();
     if (!acesso.items.length) { wixLocation.to('/portal'); return; }
     if (acesso.items[0].nivel !== 'coevo_admin') { wixLocation.to('/portal'); return; }
-
     authDone = true;
     if (htmlReady) sendVeloReady();
   } catch (err) {
