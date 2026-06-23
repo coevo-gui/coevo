@@ -92,7 +92,9 @@ $w.onReady(async () => {
         }
 
         case 'ENVIAR_TESTE': {
-          const result = await enviarTesteItem(payload.disparoId, payload.scId, payload.itemDraft, payload.emailTeste);
+          // emailsTeste é array; suporta também string legado via emailTeste
+          const emails = payload.emailsTeste || (payload.emailTeste ? [payload.emailTeste] : []);
+          const result = await enviarTesteItem(payload.disparoId, payload.scId, payload.itemDraft, emails);
           reply({ ok: result.ok, error: result.error || null });
           break;
         }
