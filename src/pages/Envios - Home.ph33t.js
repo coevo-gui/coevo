@@ -41,13 +41,19 @@ $w.onReady(async () => {
       switch (type) {
 
         case 'FETCH_DISPAROS': {
-          const result = await wixData.query('disparos').descending('_createdDate').find();
+          const result = await wixData.query('disparos').descending('_createdDate').limit(1000).find();
           reply({ data: result.items });
           break;
         }
 
         case 'FETCH_SUBCLIENTES': {
-          const result = await wixData.query('subclientes').eq('status', 'ativo').ascending('nome').find();
+          const result = await wixData.query('subclientes').eq('status', 'ativo').ascending('nome').limit(1000).find();
+          reply({ data: result.items });
+          break;
+        }
+
+        case 'FETCH_CLIENTES': {
+          const result = await wixData.query('clientes').ascending('nome').limit(1000).find();
           reply({ data: result.items });
           break;
         }

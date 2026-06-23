@@ -8,6 +8,7 @@
 //   Hotel       → aparece apenas 1 vez (link direto) se o usuário tem 1 subclient,
 //                 ou como submenu se tem vários. Nunca aparece se não tem acesso.
 //   Editar Hotel → aparece apenas se o usuário tem acesso a pelo menos 1 subclient.
+//   Cobranças   → aparece APENAS se o nível é coevo_admin.
 
 import { currentMember } from 'wix-members';
 import wixData from 'wix-data';
@@ -50,7 +51,7 @@ $w.onReady(async () => {
       );
     }
 
-    // ── Monta os itens do menu ────────────────────────────────────────────
+    // ── Monta os itens do menu ──────────────────────────────────────────
     const itensFixos = [
       { label: 'Portal',       link: '/painel/home' },
       { label: 'Documentos',   link: '/painel/documentos' },
@@ -83,6 +84,14 @@ $w.onReady(async () => {
       itensFixos.push({
         label: 'Editar Hotel',
         link:  `/cliente/editar/${primeiroSlug}`,
+      });
+    }
+
+    // Item "Cobranças": só aparece para coevo_admin
+    if (acesso.nivel === 'coevo_admin') {
+      itensFixos.push({
+        label: 'Cobranças',
+        link:  '/portal/envios',
       });
     }
 
