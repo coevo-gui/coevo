@@ -57,6 +57,8 @@ export async function criarDisparoComItens(payload) {
       mesReferencia: mesReferencia || null,
       dataVencimento: dataVencimento || null,
       textoCorpo: textoCorpo || '',
+      ccGlobal: payload.ccGlobal || '',
+      replyTo:  payload.replyTo  || 'midia@coevo.co',
       status: 'rascunho',
       criadoPor: criadoPor || '',
       totalEnviados: 0
@@ -140,7 +142,6 @@ export async function salvarRascunhoItens(itens) {
   }
 }
 
-// ─── Remover um item específico do disparo ─────────────────────────
 export async function removerItemDisparo(itemId) {
   try {
     await wixData.remove('itensDisparo', itemId, { suppressAuth: true });
@@ -151,15 +152,16 @@ export async function removerItemDisparo(itemId) {
   }
 }
 
-// ─── Atualizar campos de configuração do disparo ────────────────────
 export async function atualizarDisparoConfig(disparoId, config = {}) {
   try {
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
     const updated = { ...disparo };
-    if (config.textoCorpo  !== undefined) updated.textoCorpo  = config.textoCorpo;
-    if (config.titulo      !== undefined) updated.titulo      = config.titulo;
-    if (config.plataforma  !== undefined) updated.plataforma  = config.plataforma;
+    if (config.textoCorpo !== undefined) updated.textoCorpo = config.textoCorpo;
+    if (config.titulo    !== undefined) updated.titulo    = config.titulo;
+    if (config.plataforma !== undefined) updated.plataforma = config.plataforma;
+    if (config.ccGlobal  !== undefined) updated.ccGlobal  = config.ccGlobal;
+    if (config.replyTo   !== undefined) updated.replyTo   = config.replyTo;
     await wixData.update('disparos', updated, { suppressAuth: true });
     return { ok: true };
   } catch (err) {
@@ -323,6 +325,7 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTes
     const emailPayload = {
       sender: REMETENTE,
       to: emails.map(email => ({ email, name: 'Teste coevo' })),
+      replyTo: { email: (disparo.replyTo && isValidEmail(disparo.replyTo)) ? disparo.replyTo : 'midia@coevo.co' },
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
     };
@@ -365,6 +368,20 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         continue;
       }
       const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
+
+      // Adiciona CC global (do disparo) se presente e não duplicado
+      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) {
+        const cg = disparo.ccGlobal.trim();
+        if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) {
+          ccEmails.push({ email: cg });
+        }
+      }
+
+      // Reply-To (padrão: midia@coevo.co)
+      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim()))
+        ? disparo.replyTo.trim()
+        : 'midia@coevo.co';
+
       if (!toEmails.length) {
         console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
         erros++;
@@ -376,6 +393,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         sender: REMETENTE,
         to: toEmails,
         ...(ccEmails.length ? { cc: ccEmails } : {}),
+        replyTo: { email: replyToEmail },
         subject: buildAssunto(disparo, sc),
         htmlContent: buildHtml(disparo, item, sc)
       };
