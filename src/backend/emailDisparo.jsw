@@ -188,7 +188,8 @@ function buildAssunto(disparo, sc) {
     ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
   if (disparo.plataforma === 'comunicado') {
-    return `coevo | ${sc.sigla} | ${sc.nome} | ${disparo.titulo || 'Comunicado'}`;
+    // Assunto do comunicado = exatamente o Título do disparo
+    return disparo.titulo || 'Comunicado';
   }
   const plat = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || disparo.plataforma || '';
   return `coevo | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
@@ -496,6 +497,20 @@ export async function obterMetricasDisparo(disparoId) {
     const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
     const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
 
+    // Mapa email -> {sigla, nome} dos subclientes deste disparo (p/ casar comunicados, cujo assunto não tem sigla)
+    const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
+    const scResult = scIds.length
+      ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true })
+      : { items: [] };
+    const emailMap = {};
+    const scList = [];
+    scResult.items.forEach(sc => {
+      scList.push({ sigla: sc.sigla, nome: sc.nome });
+      [sc.emailFinanceiro, sc.emailGerenteGeral, sc.focalMktEmail].forEach(e => {
+        if (e && e.includes('@')) String(e).split(/[,\s]+/).forEach(x => { if (x.includes('@')) emailMap[x.trim().toLowerCase()] = { sigla: sc.sigla, nome: sc.nome }; });
+      });
+    });
+
     // Janela de datas: do dia de criação do disparo até hoje
     const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
     const startDate = toYMD(created);
@@ -512,21 +527,31 @@ export async function obterMetricasDisparo(disparoId) {
       const todos = await fetchBrevoEvents(headers, { startDate, endDate });
       const platKey = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || '';
       const refStr = disparo.mesReferencia ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR') : null;
+      const tituloLow = (disparo.titulo || '').toLowerCase();
       eventos = todos.filter(e => {
         const subj = (e.subject || '');
-        if (!subj.toLowerCase().includes('cobran')) return false;
+        const low = subj.toLowerCase();
+        if (disparo.plataforma === 'comunicado') {
+          return tituloLow && low.includes(tituloLow);
+        }
+        if (!low.includes('cobran')) return false;
         if (platKey && !subj.includes(platKey)) return false;
         if (refStr && !subj.includes(refStr)) return false;
         return true;
       });
     }
 
-    // Agrega por hotel (SIGLA extraída do assunto: "coevo | Cobrança X | SIGLA | Nome | ...")
+    // Agrega por hotel. Cobrança: SIGLA vem do assunto ("coevo | Cobrança X | SIGLA | Nome | ...").
+    // Comunicado: assunto = título (sem sigla), então casa pelo email do destinatário.
     const hoteis = {};
     eventos.forEach(e => {
+      let sigla = '(?)', nome = '';
       const parts = (e.subject || '').split(' | ');
-      const sigla = parts.length >= 3 ? parts[2].trim() : '(?)';
-      const nome  = parts.length >= 4 ? parts[3].trim() : '';
+      if (parts.length >= 4 && /cobran/i.test(e.subject || '')) {
+        sigla = parts[2].trim(); nome = parts[3].trim();
+      } else if (e.email && emailMap[String(e.email).toLowerCase()]) {
+        const m = emailMap[String(e.email).toLowerCase()]; sigla = m.sigla; nome = m.nome;
+      }
       if (!hoteis[sigla]) hoteis[sigla] = { sigla, nome, eventos: new Set(), emails: new Set(), ultimo: null };
       const h = hoteis[sigla];
       const ev = (e.event || '').toLowerCase();
