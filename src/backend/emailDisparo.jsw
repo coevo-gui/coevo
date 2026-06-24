@@ -3,6 +3,7 @@ import { getSecret } from 'wix-secrets-backend';
 import wixData from 'wix-data';
 
 const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
+const BREVO_EVENTS_URL = 'https://api.brevo.com/v3/smtp/statistics/events';
 const REMETENTE = { name: 'Mídia coevo', email: 'midia@coevo.co' };
 const LOGO_URL = 'https://static.wixstatic.com/media/9653d9_9568c16de9094b8f933964c0cefedaa2~mv2.png';
 
@@ -326,6 +327,7 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTes
       sender: REMETENTE,
       to: emails.map(email => ({ email, name: 'Teste coevo' })),
       replyTo: { email: (disparo.replyTo && isValidEmail(disparo.replyTo)) ? disparo.replyTo : 'midia@coevo.co' },
+      tags: ['cobranca-teste'],
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
     };
@@ -394,6 +396,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         to: toEmails,
         ...(ccEmails.length ? { cc: ccEmails } : {}),
         replyTo: { email: replyToEmail },
+        tags: ['cobranca', 'cobranca-' + disparoId],
         subject: buildAssunto(disparo, sc),
         htmlContent: buildHtml(disparo, item, sc)
       };
@@ -420,6 +423,175 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     return { ok: erros === 0, enviados, erros, total: itens.length };
   } catch (err) {
     console.error('[emailDisparo] erro:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// DASHBOARD DE ENVIOS — métricas via Brevo (statistics/events)
+// ─────────────────────────────────────────────────────────────────────
+
+function toYMD(d) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Busca eventos do Brevo com paginação. Filtra por tag (envios novos) ou só por data (fallback).
+async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
+  let all = [];
+  let offset = 0;
+  const limit = 5000;
+  for (let i = 0; i < 6; i++) {
+    let url = `${BREVO_EVENTS_URL}?limit=${limit}&offset=${offset}&sort=desc`;
+    if (startDate) url += `&startDate=${startDate}`;
+    if (endDate)   url += `&endDate=${endDate}`;
+    if (tag)       url += `&tags=${encodeURIComponent(JSON.stringify([tag]))}`;
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) {
+      const t = await res.text();
+      console.error('[emailDisparo] Brevo events', res.status, t);
+      break;
+    }
+    const data = await res.json();
+    const events = data.events || [];
+    all = all.concat(events);
+    if (events.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+// Reduz o conjunto de tipos de evento (lowercase) de um hotel para flags de status.
+function classificarEventos(eventosSet) {
+  const has = (...keys) => keys.some(k => eventosSet.has(k));
+  return {
+    entregue:    has('delivered'),
+    aberto:      has('opened', 'uniqueopened', 'firstopening', 'proxy_open', 'loadedbyproxy', 'uniqueopens'),
+    clicado:     has('clicks', 'click', 'clicked'),
+    bounce:      has('hardbounces', 'softbounces', 'hardbounce', 'softbounce', 'bounce', 'bounces', 'invalid'),
+    bloqueado:   has('blocked'),
+    spam:        has('spam', 'spamreports'),
+    erro:        has('error', 'deferred'),
+    desinscrito: has('unsubscribed', 'unsubscribe')
+  };
+}
+
+// Retorna métricas de um disparo: resumo agregado + por hotel + reconciliação com o CMS.
+export async function obterMetricasDisparo(disparoId) {
+  try {
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
+    const headers = { 'api-key': brevoKey, 'Accept': 'application/json' };
+
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
+
+    // Estado real no CMS (autoritativo para "foi enviado ou não")
+    const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
+    const itens = itensResult.items;
+    const cmsEnviados  = itens.filter(i => i.statusEnvio === 'enviado').length;
+    const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
+    const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
+
+    // Janela de datas: do dia de criação do disparo até hoje
+    const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
+    const startDate = toYMD(created);
+    const endDate = toYMD(new Date());
+
+    // 1) Tenta casar por tag (envios novos têm tag cobranca-{disparoId})
+    const tag = 'cobranca-' + disparoId;
+    let eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
+    let matchedBy = 'tag';
+
+    // 2) Fallback para envios antigos (sem tag): filtra por data + assunto
+    if (!eventos.length) {
+      matchedBy = 'assunto';
+      const todos = await fetchBrevoEvents(headers, { startDate, endDate });
+      const platKey = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || '';
+      const refStr = disparo.mesReferencia ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR') : null;
+      eventos = todos.filter(e => {
+        const subj = (e.subject || '');
+        if (!subj.toLowerCase().includes('cobran')) return false;
+        if (platKey && !subj.includes(platKey)) return false;
+        if (refStr && !subj.includes(refStr)) return false;
+        return true;
+      });
+    }
+
+    // Agrega por hotel (SIGLA extraída do assunto: "coevo | Cobrança X | SIGLA | Nome | ...")
+    const hoteis = {};
+    eventos.forEach(e => {
+      const parts = (e.subject || '').split(' | ');
+      const sigla = parts.length >= 3 ? parts[2].trim() : '(?)';
+      const nome  = parts.length >= 4 ? parts[3].trim() : '';
+      if (!hoteis[sigla]) hoteis[sigla] = { sigla, nome, eventos: new Set(), emails: new Set(), ultimo: null };
+      const h = hoteis[sigla];
+      const ev = (e.event || '').toLowerCase();
+      if (ev) h.eventos.add(ev);
+      if (e.email) h.emails.add(e.email);
+      if (e.date && (!h.ultimo || e.date > h.ultimo)) h.ultimo = e.date;
+    });
+
+    const porHotel = Object.values(hoteis).map(h => {
+      const c = classificarEventos(h.eventos);
+      return { sigla: h.sigla, nome: h.nome, emails: [...h.emails], ...c, ultimoEvento: h.ultimo };
+    }).sort((a, b) => a.sigla.localeCompare(b.sigla));
+
+    // Resumo agregado (contagem por hotel)
+    const totalHoteis = porHotel.length;
+    const cont = (k) => porHotel.filter(h => h[k]).length;
+    const resumo = {
+      totalHoteis,
+      entregues:  cont('entregue'),
+      aberturas:  cont('aberto'),
+      cliques:    cont('clicado'),
+      bounces:    cont('bounce'),
+      bloqueados: cont('bloqueado'),
+      erros:      cont('erro'),
+      spam:       cont('spam')
+    };
+    resumo.taxaEntrega  = totalHoteis      ? Math.round(100 * resumo.entregues / totalHoteis) : 0;
+    resumo.taxaAbertura = resumo.entregues ? Math.round(100 * resumo.aberturas / resumo.entregues) : 0;
+    resumo.taxaClique   = resumo.entregues ? Math.round(100 * resumo.cliques / resumo.entregues) : 0;
+
+    return {
+      ok: true,
+      matchedBy,
+      totalEventos: eventos.length,
+      disparo: {
+        id: disparo._id,
+        titulo: disparo.titulo,
+        plataforma: disparo.plataforma,
+        status: disparo.status,
+        totalEnviados: disparo.totalEnviados,
+        criadoPor: disparo.criadoPor,
+        mesReferencia: disparo.mesReferencia,
+        _createdDate: disparo._createdDate
+      },
+      cms: { totalItens: itens.length, enviados: cmsEnviados, erros: cmsErros, pendentes: cmsPendentes },
+      resumo,
+      porHotel
+    };
+  } catch (err) {
+    console.error('[emailDisparo] obterMetricasDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// Correção manual de status do disparo (usada pelo dashboard, ex.: marcar "parcial" como "enviado").
+export async function corrigirStatusDisparo(disparoId, novoStatus) {
+  try {
+    const permitidos = ['rascunho', 'enviado', 'parcial', 'erro'];
+    if (!permitidos.includes(novoStatus)) return { ok: false, error: 'Status inválido: ' + novoStatus };
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
+    await wixData.update('disparos', { ...disparo, status: novoStatus }, { suppressAuth: true });
+    return { ok: true, status: novoStatus };
+  } catch (err) {
+    console.error('[emailDisparo] corrigirStatusDisparo:', err.message || err);
     return { ok: false, error: err.message || String(err) };
   }
 }
