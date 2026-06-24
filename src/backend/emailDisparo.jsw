@@ -140,14 +140,26 @@ export async function salvarRascunhoItens(itens) {
   }
 }
 
-// ─── Atualizar campos de configuração do disparo (textoCorpo, titulo) ──────
+// ─── Remover um item específico do disparo ─────────────────────────
+export async function removerItemDisparo(itemId) {
+  try {
+    await wixData.remove('itensDisparo', itemId, { suppressAuth: true });
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] removerItemDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── Atualizar campos de configuração do disparo ────────────────────
 export async function atualizarDisparoConfig(disparoId, config = {}) {
   try {
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
     const updated = { ...disparo };
-    if (config.textoCorpo !== undefined) updated.textoCorpo = config.textoCorpo;
-    if (config.titulo !== undefined) updated.titulo = config.titulo;
+    if (config.textoCorpo  !== undefined) updated.textoCorpo  = config.textoCorpo;
+    if (config.titulo      !== undefined) updated.titulo      = config.titulo;
+    if (config.plataforma  !== undefined) updated.plataforma  = config.plataforma;
     await wixData.update('disparos', updated, { suppressAuth: true });
     return { ok: true };
   } catch (err) {

@@ -8,6 +8,7 @@ import {
   fetchItensDisparo,
   salvarRascunhoItens,
   atualizarDisparoConfig,
+  removerItemDisparo,
   enviarDisparos,
   deletarDisparo,
   previewEmailItem,
@@ -86,6 +87,12 @@ $w.onReady(async () => {
 
         case 'ATUALIZAR_DISPARO': {
           const result = await atualizarDisparoConfig(payload.disparoId, payload.config || {});
+          reply({ ok: result.ok, error: result.error || null });
+          break;
+        }
+
+        case 'REMOVER_ITEM': {
+          const result = await removerItemDisparo(payload.itemId);
           reply({ ok: result.ok, error: result.error || null });
           break;
         }
