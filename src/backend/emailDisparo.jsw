@@ -315,8 +315,15 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const scArr = scIds.length ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null))) : [];
     const scMap = {};
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
-    let enviados = 0, erros = 0;
+    let enviados = 0, erros = 0, pulados = 0;
     for (const item of itens) {
+      // PROTEÇÃO CONTRA REENVIO: nunca reenviar um item já marcado como enviado no CMS
+      if (item.statusEnvio === 'enviado') {
+        console.warn('[emailDisparo] item já enviado, pulando reenvio:', item._id);
+        pulados++;
+        enviados++;
+        continue;
+      }
       const scId = itemScMap[item._id] || item.subclienteRef;
       const sc = scMap[scId];
       if (!sc) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
@@ -331,19 +338,18 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         else { const errText = await res.text(); console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText); erros++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); }
       } catch (fetchErr) { console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message); erros++; }
     }
+    if (pulados > 0) console.warn(`[emailDisparo] ${pulados} itens pulados por já terem sido enviados anteriormente.`);
     const ed = await wixData.get('disparos', disparoId, { suppressAuth: true });
     const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
     await wixData.update('disparos', { ...ed, status: statusFinal, totalEnviados: enviados }, { suppressAuth: true });
-    return { ok: erros === 0, enviados, erros, total: itens.length };
+    return { ok: erros === 0, enviados, erros, pulados, total: itens.length };
   } catch (err) {
     console.error('[emailDisparo] erro:', err.message || err);
     return { ok: false, error: err.message || String(err) };
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// DASHBOARD — métricas via Brevo
-// ─────────────────────────────────────────────────────────────────────
+// ─── DASHBOARD — métricas via Brevo ───
 
 function toYMD(d) {
   const dt = (d instanceof Date) ? d : new Date(d);
