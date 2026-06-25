@@ -1,0 +1,498 @@
+// Web Method — Disparos de Cobrança
+import { getSecret } from 'wix-secrets-backend';
+import wixData from 'wix-data';
+
+const BREVO_URL = 'https://api.brevo.com/v3/smtp/email';
+const BREVO_EVENTS_URL = 'https://api.brevo.com/v3/smtp/statistics/events';
+const REMETENTE = { name: 'Mídia coevo', email: 'midia@coevo.co' };
+const LOGO_URL = 'https://static.wixstatic.com/media/9653d9_9568c16de9094b8f933964c0cefedaa2~mv2.png';
+
+function parseBRL(str) {
+  if (!str) return 0;
+  return parseFloat(String(str).replace('R$','').replace(/\./g,'').replace(',','.').trim()) || 0;
+}
+
+function isValidEmail(e) {
+  return e && typeof e === 'string' && e.includes('@') && e !== 'N/A';
+}
+
+function resolverDestinatarios(sc, destinatarios = {}) {
+  const dest = {
+    financeiro:   destinatarios.financeiro   !== false,
+    gerenteGeral: destinatarios.gerenteGeral !== false,
+    focalMkt:     destinatarios.focalMkt     !== false,
+    copia:        destinatarios.copia        !== false
+  };
+  const to = [];
+  if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   to.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
+  if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) to.push({ email: sc.emailGerenteGeral, name: sc.contatoGerenteGeral || sc.nome });
+  if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     to.push({ email: sc.focalMktEmail,    name: sc.focalMktContato || sc.nome });
+  const cc = [];
+  if (dest.copia && sc.emailsCopia) {
+    sc.emailsCopia.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
+      if (!to.some(t => t.email === email)) cc.push({ email });
+    });
+  }
+  return { to, cc };
+}
+
+export async function fetchDisparos() {
+  try {
+    const result = await wixData.query('disparos').descending('_createdDate').limit(1000).find({ suppressAuth: true });
+    const disparos = result.items;
+    const counts = await Promise.all(disparos.map(d =>
+      wixData.query('itensDisparo').eq('disparoRef', d._id).count({ suppressAuth: true }).catch(() => 0)
+    ));
+    return { ok: true, data: disparos.map((d, i) => ({ ...d, _totalItens: counts[i] })) };
+  } catch (err) {
+    console.error('[emailDisparo] fetchDisparos:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function criarDisparoComItens(payload) {
+  try {
+    const { titulo, plataforma, mesReferencia, dataVencimento, textoCorpo, subclienteIds, criadoPor } = payload;
+    const novoDisparo = await wixData.insert('disparos', {
+      titulo, plataforma,
+      mesReferencia: mesReferencia || null,
+      dataVencimento: dataVencimento || null,
+      textoCorpo: textoCorpo || '',
+      ccGlobal: payload.ccGlobal || '',
+      replyTo:  payload.replyTo  || 'midia@coevo.co',
+      status: 'rascunho',
+      criadoPor: criadoPor || '',
+      totalEnviados: 0
+    }, { suppressAuth: true });
+    const scResult = await wixData.query('subclientes').hasSome('_id', subclienteIds).limit(1000).find({ suppressAuth: true });
+    const scMap = {};
+    scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+    const itens = await Promise.all(subclienteIds.map(scId => {
+      const sc = scMap[scId] || {};
+      const valor = plataforma === 'mads' ? parseBRL(sc.valorMidiaMeta) : parseBRL(sc.valorMidiaGoogle);
+      return wixData.insert('itensDisparo', {
+        disparoRef: novoDisparo._id,
+        subclienteRef: scId,
+        valorInvestimento: valor || 0,
+        tipoPagamento: 'boleto',
+        pixCode: '',
+        boletoUrl: '',
+        statusEnvio: 'pendente'
+      }, { suppressAuth: true });
+    }));
+    return {
+      ok: true,
+      disparoId: novoDisparo._id,
+      disparo: novoDisparo,
+      itens: itens.map((item, i) => ({ ...item, _sc: scMap[subclienteIds[i]] || {} }))
+    };
+  } catch (err) {
+    console.error('[emailDisparo] criarDisparoComItens:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function fetchItensDisparo(disparoId) {
+  try {
+    const [disparo, itensResult] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true })
+    ]);
+    const itens = itensResult.items;
+    const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
+    const scResult = scIds.length
+      ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true })
+      : { items: [] };
+    const scMap = {};
+    scResult.items.forEach(sc => { scMap[sc._id] = sc; });
+    return {
+      ok: true,
+      disparo,
+      itens: itens.map(item => ({ ...item, _sc: scMap[item.subclienteRef] || {} }))
+    };
+  } catch (err) {
+    console.error('[emailDisparo] fetchItensDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function salvarRascunhoItens(itens) {
+  try {
+    if (!itens.length) return { ok: true };
+    await Promise.all(itens.map(async (item) => {
+      const existing = await wixData.get('itensDisparo', item._id, { suppressAuth: true });
+      return wixData.update('itensDisparo', {
+        ...existing,
+        valorInvestimento: item.valorInvestimento,
+        tipoPagamento: item.tipoPagamento,
+        pixCode: item.pixCode || '',
+        boletoUrl: item.boletoUrl || ''
+      }, { suppressAuth: true });
+    }));
+    try {
+      const primeiroItem = await wixData.get('itensDisparo', itens[0]._id, { suppressAuth: true }).catch(() => null);
+      if (primeiroItem && primeiroItem.disparoRef) {
+        const disp = await wixData.get('disparos', primeiroItem.disparoRef, { suppressAuth: true }).catch(() => null);
+        if (disp) await wixData.update('disparos', disp, { suppressAuth: true });
+      }
+    } catch (_) {}
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] salvarRascunhoItens:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function removerItemDisparo(itemId) {
+  try {
+    await wixData.remove('itensDisparo', itemId, { suppressAuth: true });
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] removerItemDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function atualizarDisparoConfig(disparoId, config = {}) {
+  try {
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
+    const updated = { ...disparo };
+    if (config.textoCorpo !== undefined) updated.textoCorpo = config.textoCorpo;
+    if (config.titulo     !== undefined) updated.titulo     = config.titulo;
+    if (config.plataforma !== undefined) updated.plataforma = config.plataforma;
+    if (config.ccGlobal   !== undefined) updated.ccGlobal   = config.ccGlobal;
+    if (config.replyTo    !== undefined) updated.replyTo    = config.replyTo;
+    await wixData.update('disparos', updated, { suppressAuth: true });
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] atualizarDisparoConfig:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function deletarDisparo(disparoId) {
+  try {
+    const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
+    await Promise.all(itensResult.items.map(item => wixData.remove('itensDisparo', item._id, { suppressAuth: true })));
+    await wixData.remove('disparos', disparoId, { suppressAuth: true });
+    return { ok: true };
+  } catch (err) {
+    console.error('[emailDisparo] deletarDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+function buildAssunto(disparo, sc) {
+  if (disparo.plataforma === 'comunicado') {
+    return disparo.titulo || 'Comunicado';
+  }
+  const dataRef = disparo.mesReferencia
+    ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
+    : new Date().toLocaleDateString('pt-BR');
+  const plat = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || disparo.plataforma || '';
+  return `coevo | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
+}
+
+function buildHtml(disparo, item, sc) {
+  const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
+  const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
+  const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
+  const textoCorpo = disparo.textoCorpo || (disparo.plataforma === 'comunicado'
+    ? ''
+    : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
+  const textoCorpoHtml = textoCorpo && !textoCorpo.includes('<')
+    ? textoCorpo.split(/\n\n+/).map(p => '<p style="margin:0 0 12px">' + p.replace(/\n/g, '<br>') + '</p>').join('')
+    : textoCorpo;
+  const nomeCompleto = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
+  const nomeContato = nomeCompleto ? nomeCompleto.trim().split(' ')[0] : '';
+  const saudacao = nomeContato
+    ? `Oi, ${nomeContato}! Como vai? Por aqui, tudo bem.`
+    : `Prezado(a) Parceiro COEVO,`;
+  const isComunicado = disparo.plataforma === 'comunicado';
+  const blocoPagamento = item.tipoPagamento === 'pix'
+    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p><div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
+    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p><a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
+  const blocoCobranca = isComunicado ? '' : `
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px"><tr><td style="padding:20px 24px">
+          <p style="margin:0 0 12px;color:#0a0a1a;font-size:10px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase">Sobre a Cobran&ccedil;a</p>
+          <table role="presentation" cellpadding="0" cellspacing="0">
+            <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px;white-space:nowrap">Hotel:</td><td style="padding:3px 0;color:#0a0a1a;font-size:13px;font-weight:600">${sc.nome}</td></tr>
+            <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">CNPJ:</td><td style="padding:3px 0;color:#0a0a1a;font-size:13px">${sc.cnpj || '\u2014'}</td></tr>
+            <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Valor:</td><td style="padding:3px 0;color:#002bff;font-size:17px;font-weight:bold">${valor}</td></tr>
+            <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Vencimento:</td><td style="padding:3px 0;color:#0a0a1a;font-size:14px;font-weight:700">${venc}</td></tr>
+          </table></td></tr></table>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 24px"><tr><td style="padding:20px 24px">${blocoPagamento}</td></tr></table>
+      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado, para evitar que a conta fique sem saldo.</p>`;
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5"><tr><td align="center" style="padding:32px 16px"><table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)"><tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff"><img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto"></td></tr><tr><td style="padding:32px 36px 28px"><p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p><div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>${blocoCobranca}<p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p><p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p></td></tr><tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center"><p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">&copy; coevo &middot; conectando vidas &amp; lugares &middot; <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a> &middot; <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a></p></td></tr></table></td></tr></table></body></html>`;
+}
+
+export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}, corpoDraft = null) {
+  try {
+    const [disparo, sc] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.get('subclientes', scId, { suppressAuth: true })
+    ]);
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
+    if (!sc) return { ok: false, error: 'Subcliente não encontrado.' };
+    const disparoComCorpo = (corpoDraft !== null && corpoDraft !== undefined)
+      ? { ...disparo, textoCorpo: corpoDraft }
+      : disparo;
+    const item = {
+      valorInvestimento: itemDraft.valorInvestimento || 0,
+      tipoPagamento: itemDraft.tipoPagamento || 'boleto',
+      pixCode: itemDraft.pixCode || '',
+      boletoUrl: itemDraft.boletoUrl || ''
+    };
+    const { to, cc } = resolverDestinatarios(sc, destinatarios);
+    return {
+      ok: true,
+      html: buildHtml(disparoComCorpo, item, sc),
+      assunto: buildAssunto(disparoComCorpo, sc),
+      to: to.map(t => t.email),
+      cc: cc.map(c => c.email)
+    };
+  } catch (err) {
+    console.error('[emailDisparo] previewEmailItem:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTeste = []) {
+  try {
+    const emails = Array.isArray(emailsTeste)
+      ? emailsTeste.filter(isValidEmail)
+      : String(emailsTeste).split(/[,;\s]+/).map(e => e.trim()).filter(isValidEmail);
+    if (!emails.length) return { ok: false, error: 'Nenhum email de teste válido.' };
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia.' };
+    const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
+    const [disparo, sc] = await Promise.all([
+      wixData.get('disparos', disparoId, { suppressAuth: true }),
+      wixData.get('subclientes', scId, { suppressAuth: true })
+    ]);
+    if (!disparo || !sc) return { ok: false, error: 'Dados não encontrados.' };
+    const item = {
+      valorInvestimento: itemDraft.valorInvestimento || 0,
+      tipoPagamento: itemDraft.tipoPagamento || 'boleto',
+      pixCode: itemDraft.pixCode || '',
+      boletoUrl: itemDraft.boletoUrl || ''
+    };
+    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({
+      sender: REMETENTE,
+      to: emails.map(email => ({ email, name: 'Teste coevo' })),
+      replyTo: { email: (disparo.replyTo && isValidEmail(disparo.replyTo)) ? disparo.replyTo : 'midia@coevo.co' },
+      tags: ['cobranca-teste'],
+      subject: '[TESTE] ' + buildAssunto(disparo, sc),
+      htmlContent: buildHtml(disparo, item, sc)
+    }) });
+    if (res.ok) return { ok: true };
+    const errText = await res.text();
+    console.error('[emailDisparo] enviarTesteItem Brevo', res.status, errText);
+    return { ok: false, error: 'Brevo ' + res.status };
+  } catch (err) {
+    console.error('[emailDisparo] enviarTesteItem:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = {}) {
+  try {
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
+    const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
+    const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
+    const itens = itensResult.items;
+    if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
+    const scIds = [...new Set(itens.map(item => itemScMap[item._id] || item.subclienteRef))].filter(Boolean);
+    const scArr = scIds.length ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null))) : [];
+    const scMap = {};
+    scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
+    let enviados = 0, erros = 0, pulados = 0;
+    for (const item of itens) {
+      // PROTEÇÃO CONTRA REENVIO: nunca reenviar um item já marcado como enviado no CMS
+      if (item.statusEnvio === 'enviado') {
+        console.warn('[emailDisparo] item já enviado, pulando reenvio:', item._id);
+        pulados++;
+        enviados++;
+        continue;
+      }
+      // PROTEÇÃO CONTRA VALOR ZERADO: não envia cobrança sem valor definido
+      if (disparo.plataforma !== 'comunicado' && (!item.valorInvestimento || item.valorInvestimento <= 0)) {
+        console.warn('[emailDisparo] valorInvestimento ausente/zerado, bloqueando envio:', item._id);
+        erros++;
+        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
+        if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
+        continue;
+      }
+      const scId = itemScMap[item._id] || item.subclienteRef;
+      const sc = scMap[scId];
+      if (!sc) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
+      const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
+      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) { const cg = disparo.ccGlobal.trim(); if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) ccEmails.push({ email: cg }); }
+      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim())) ? disparo.replyTo.trim() : 'midia@coevo.co';
+      if (!toEmails.length) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
+      try {
+        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({ sender: REMETENTE, to: toEmails, ...(ccEmails.length ? { cc: ccEmails } : {}), replyTo: { email: replyToEmail }, tags: ['cobranca', 'cobranca-' + disparoId], subject: buildAssunto(disparo, sc), htmlContent: buildHtml(disparo, item, sc) }) });
+        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
+        if (res.ok) { enviados++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'enviado', emailEnviadoPara: toEmails.map(t => t.email).join(', ') }, { suppressAuth: true }); }
+        else { const errText = await res.text(); console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText); erros++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); }
+      } catch (fetchErr) { console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message); erros++; }
+    }
+    if (pulados > 0) console.warn(`[emailDisparo] ${pulados} itens pulados por já terem sido enviados anteriormente.`);
+    const ed = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
+    await wixData.update('disparos', { ...ed, status: statusFinal, totalEnviados: enviados }, { suppressAuth: true });
+    return { ok: erros === 0, enviados, erros, pulados, total: itens.length };
+  } catch (err) {
+    console.error('[emailDisparo] erro:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── DASHBOARD — métricas via Brevo ───
+
+function toYMD(d) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+
+async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
+  let all = [], offset = 0;
+  const limit = 5000;
+  for (let i = 0; i < 6; i++) {
+    let url = `${BREVO_EVENTS_URL}?limit=${limit}&offset=${offset}&sort=desc`;
+    if (startDate) url += `&startDate=${startDate}`;
+    if (endDate)   url += `&endDate=${endDate}`;
+    if (tag)       url += `&tags=${encodeURIComponent(JSON.stringify([tag]))}`;
+    const res = await fetch(url, { method: 'GET', headers });
+    if (!res.ok) { const t = await res.text(); console.error('[emailDisparo] Brevo events', res.status, t); break; }
+    const data = await res.json();
+    const events = data.events || [];
+    all = all.concat(events);
+    if (events.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
+function classificarEventos(eventosSet) {
+  const has = (...keys) => keys.some(k => eventosSet.has(k));
+  return {
+    entregue:    has('delivered'),
+    aberto:      has('opened','uniqueopened','firstopening','proxy_open','loadedbyproxy','uniqueopens'),
+    clicado:     has('clicks','click','clicked'),
+    bounce:      has('hardbounces','softbounces','hardbounce','softbounce','bounce','bounces','invalid'),
+    bloqueado:   has('blocked'),
+    spam:        has('spam','spamreports'),
+    erro:        has('error','deferred'),
+    desinscrito: has('unsubscribed','unsubscribe')
+  };
+}
+
+function evToCanon(ev) {
+  if (ev === 'delivered') return 'entregue';
+  if (['opened','uniqueopened','firstopening','proxy_open','loadedbyproxy','uniqueopens'].includes(ev)) return 'aberto';
+  if (['clicks','click','clicked'].includes(ev)) return 'clicado';
+  if (['hardbounces','softbounces','hardbounce','softbounce','bounce','bounces','invalid'].includes(ev)) return 'bounce';
+  if (ev === 'blocked') return 'bloqueado';
+  return null;
+}
+
+export async function obterMetricasDisparo(disparoId) {
+  try {
+    const brevoKey = await getSecret('BREVO_API_KEY');
+    if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
+    const headers = { 'api-key': brevoKey, 'Accept': 'application/json' };
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
+    const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
+    const itens = itensResult.items;
+    const cmsEnviados  = itens.filter(i => i.statusEnvio === 'enviado').length;
+    const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
+    const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
+    const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
+    const scResult = scIds.length ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true }) : { items: [] };
+    const emailMap = {};
+    scResult.items.forEach(sc => {
+      [sc.emailFinanceiro, sc.emailGerenteGeral, sc.focalMktEmail].forEach(e => {
+        if (e && e.includes('@')) String(e).split(/[,\s]+/).forEach(x => { if (x.includes('@')) emailMap[x.trim().toLowerCase()] = { sigla: sc.sigla, nome: sc.nome }; });
+      });
+    });
+    const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
+    const startDate = toYMD(created);
+    const endDate = toYMD(new Date());
+    const tag = 'cobranca-' + disparoId;
+    let eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
+    let matchedBy = 'tag';
+    if (!eventos.length) {
+      matchedBy = 'assunto';
+      const todos = await fetchBrevoEvents(headers, { startDate, endDate });
+      const platKey = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || '';
+      const refStr = disparo.mesReferencia ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR') : null;
+      const tituloLow = (disparo.titulo || '').toLowerCase();
+      eventos = todos.filter(e => {
+        const subj = (e.subject || ''); const low = subj.toLowerCase();
+        if (disparo.plataforma === 'comunicado') return tituloLow && low.includes(tituloLow);
+        if (!low.includes('cobran')) return false;
+        if (platKey && !subj.includes(platKey)) return false;
+        if (refStr && !subj.includes(refStr)) return false;
+        return true;
+      });
+    }
+    const hoteis = {};
+    eventos.forEach(e => {
+      let sigla = '(?)', nome = '';
+      const parts = (e.subject || '').split(' | ');
+      if (parts.length >= 4 && /cobran/i.test(e.subject || '')) { sigla = parts[2].trim(); nome = parts[3].trim(); }
+      else if (e.email && emailMap[String(e.email).toLowerCase()]) { const m = emailMap[String(e.email).toLowerCase()]; sigla = m.sigla; nome = m.nome; }
+      if (!hoteis[sigla]) hoteis[sigla] = { sigla, nome, eventos: new Set(), emails: new Set(), ultimo: null, porEmail: {} };
+      const h = hoteis[sigla];
+      const ev = (e.event || '').toLowerCase();
+      if (ev) h.eventos.add(ev);
+      if (e.email) {
+        const emailKey = String(e.email).toLowerCase().trim();
+        h.emails.add(emailKey);
+        if (!h.porEmail[emailKey]) h.porEmail[emailKey] = {};
+        const canon = evToCanon(ev);
+        if (canon && e.date && !h.porEmail[emailKey][canon]) h.porEmail[emailKey][canon] = e.date;
+        if (e.date && (!h.ultimo || e.date > h.ultimo)) h.ultimo = e.date;
+      }
+    });
+    const porHotel = Object.values(hoteis).map(h => {
+      const c = classificarEventos(h.eventos);
+      return { sigla: h.sigla, nome: h.nome, emails: [...h.emails], eventosPorEmail: h.porEmail, ...c, ultimoEvento: h.ultimo };
+    }).sort((a, b) => a.sigla.localeCompare(b.sigla));
+    const totalHoteis = porHotel.length;
+    const cont = (k) => porHotel.filter(h => h[k]).length;
+    const resumo = { totalHoteis, entregues: cont('entregue'), aberturas: cont('aberto'), cliques: cont('clicado'), bounces: cont('bounce'), bloqueados: cont('bloqueado'), erros: cont('erro'), spam: cont('spam') };
+    resumo.taxaEntrega  = totalHoteis      ? Math.round(100 * resumo.entregues / totalHoteis) : 0;
+    resumo.taxaAbertura = resumo.entregues ? Math.round(100 * resumo.aberturas / resumo.entregues) : 0;
+    resumo.taxaClique   = resumo.entregues ? Math.round(100 * resumo.cliques / resumo.entregues) : 0;
+    return {
+      ok: true, matchedBy, totalEventos: eventos.length,
+      disparo: { id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma, status: disparo.status, totalEnviados: disparo.totalEnviados, criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia, _createdDate: disparo._createdDate },
+      cms: { totalItens: itens.length, enviados: cmsEnviados, erros: cmsErros, pendentes: cmsPendentes },
+      resumo, porHotel
+    };
+  } catch (err) {
+    console.error('[emailDisparo] obterMetricasDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+export async function corrigirStatusDisparo(disparoId, novoStatus) {
+  try {
+    const permitidos = ['rascunho', 'enviado', 'parcial', 'erro'];
+    if (!permitidos.includes(novoStatus)) return { ok: false, error: 'Status inválido: ' + novoStatus };
+    const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
+    if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
+    await wixData.update('disparos', { ...disparo, status: novoStatus }, { suppressAuth: true });
+    return { ok: true, status: novoStatus };
+  } catch (err) {
+    console.error('[emailDisparo] corrigirStatusDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
