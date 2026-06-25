@@ -60,6 +60,7 @@ export async function criarDisparoComItens(payload) {
       textoCorpo: textoCorpo || '',
       ccGlobal: payload.ccGlobal || '',
       replyTo:  payload.replyTo  || 'midia@coevo.co',
+      nomeRemetente: payload.nomeRemetente || 'Mídia coevo',
       status: 'rascunho',
       criadoPor: criadoPor || '',
       totalEnviados: 0
@@ -158,11 +159,12 @@ export async function atualizarDisparoConfig(disparoId, config = {}) {
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
     const updated = { ...disparo };
-    if (config.textoCorpo !== undefined) updated.textoCorpo = config.textoCorpo;
-    if (config.titulo     !== undefined) updated.titulo     = config.titulo;
-    if (config.plataforma !== undefined) updated.plataforma = config.plataforma;
-    if (config.ccGlobal   !== undefined) updated.ccGlobal   = config.ccGlobal;
-    if (config.replyTo    !== undefined) updated.replyTo    = config.replyTo;
+    if (config.textoCorpo    !== undefined) updated.textoCorpo    = config.textoCorpo;
+    if (config.titulo        !== undefined) updated.titulo        = config.titulo;
+    if (config.plataforma    !== undefined) updated.plataforma    = config.plataforma;
+    if (config.ccGlobal      !== undefined) updated.ccGlobal      = config.ccGlobal;
+    if (config.replyTo       !== undefined) updated.replyTo       = config.replyTo;
+    if (config.nomeRemetente !== undefined) updated.nomeRemetente = config.nomeRemetente;
     await wixData.update('disparos', updated, { suppressAuth: true });
     return { ok: true };
   } catch (err) {
@@ -198,33 +200,78 @@ function buildHtml(disparo, item, sc) {
   const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
   const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
   const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
+
   const textoCorpo = disparo.textoCorpo || (disparo.plataforma === 'comunicado'
     ? ''
     : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
+
   const textoCorpoHtml = textoCorpo && !textoCorpo.includes('<')
     ? textoCorpo.split(/\n\n+/).map(p => '<p style="margin:0 0 12px">' + p.replace(/\n/g, '<br>') + '</p>').join('')
     : textoCorpo;
+
   const nomeCompleto = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
   const nomeContato = nomeCompleto ? nomeCompleto.trim().split(' ')[0] : '';
   const saudacao = nomeContato
     ? `Oi, ${nomeContato}! Como vai? Por aqui, tudo bem.`
     : `Prezado(a) Parceiro COEVO,`;
+
   const isComunicado = disparo.plataforma === 'comunicado';
+
   const blocoPagamento = item.tipoPagamento === 'pix'
-    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p><div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
-    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p><a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
+    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p>
+       <div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
+    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p>
+       <a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
+
   const blocoCobranca = isComunicado ? '' : `
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px"><tr><td style="padding:20px 24px">
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px">
+        <tr><td style="padding:20px 24px">
           <p style="margin:0 0 12px;color:#0a0a1a;font-size:10px;font-weight:bold;letter-spacing:.08em;text-transform:uppercase">Sobre a Cobran&ccedil;a</p>
           <table role="presentation" cellpadding="0" cellspacing="0">
             <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px;white-space:nowrap">Hotel:</td><td style="padding:3px 0;color:#0a0a1a;font-size:13px;font-weight:600">${sc.nome}</td></tr>
             <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">CNPJ:</td><td style="padding:3px 0;color:#0a0a1a;font-size:13px">${sc.cnpj || '\u2014'}</td></tr>
             <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Valor:</td><td style="padding:3px 0;color:#002bff;font-size:17px;font-weight:bold">${valor}</td></tr>
             <tr><td style="padding:3px 20px 3px 0;color:#6b7280;font-size:13px">Vencimento:</td><td style="padding:3px 0;color:#0a0a1a;font-size:14px;font-weight:700">${venc}</td></tr>
-          </table></td></tr></table>
-      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 24px"><tr><td style="padding:20px 24px">${blocoPagamento}</td></tr></table>
-      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado, para evitar que a conta fique sem saldo.</p>`;
-  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5"><tr><td align="center" style="padding:32px 16px"><table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)"><tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff"><img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto"></td></tr><tr><td style="padding:32px 36px 28px"><p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p><div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>${blocoCobranca}<p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p><p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p></td></tr><tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center"><p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">&copy; coevo &middot; conectando vidas &amp; lugares &middot; <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a> &middot; <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a></p></td></tr></table></td></tr></table></body></html>`;
+          </table>
+        </td></tr>
+      </table>
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 24px">
+        <tr><td style="padding:20px 24px">${blocoPagamento}</td></tr>
+      </table>
+      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">
+        Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado, para evitar que a conta fique sem saldo.
+      </p>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5">
+<tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)">
+    <tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff">
+      <img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto">
+    </td></tr>
+    <tr><td style="padding:32px 36px 28px">
+      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p>
+      <div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>
+      ${blocoCobranca}
+      <p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p>
+      <p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p>
+    </td></tr>
+    <tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center">
+      <p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">
+        &copy; coevo &middot; conectando vidas &amp; lugares &middot;
+        <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a>
+        &middot;
+        <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a>
+      </p>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>`;
 }
 
 export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}, corpoDraft = null) {
@@ -278,14 +325,15 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTes
       pixCode: itemDraft.pixCode || '',
       boletoUrl: itemDraft.boletoUrl || ''
     };
-    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({
-      sender: REMETENTE,
+    const emailPayload = {
+      sender: { name: disparo.nomeRemetente || REMETENTE.name, email: REMETENTE.email },
       to: emails.map(email => ({ email, name: 'Teste coevo' })),
       replyTo: { email: (disparo.replyTo && isValidEmail(disparo.replyTo)) ? disparo.replyTo : 'midia@coevo.co' },
       tags: ['cobranca-teste'],
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
-    }) });
+    };
+    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
     if (res.ok) return { ok: true };
     const errText = await res.text();
     console.error('[emailDisparo] enviarTesteItem Brevo', res.status, errText);
@@ -307,7 +355,9 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
     const scIds = [...new Set(itens.map(item => itemScMap[item._id] || item.subclienteRef))].filter(Boolean);
-    const scArr = scIds.length ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null))) : [];
+    const scArr = scIds.length
+      ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null)))
+      : [];
     const scMap = {};
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
     let enviados = 0, erros = 0, pulados = 0;
@@ -329,17 +379,53 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
       }
       const scId = itemScMap[item._id] || item.subclienteRef;
       const sc = scMap[scId];
-      if (!sc) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
-      const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
-      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) { const cg = disparo.ccGlobal.trim(); if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) ccEmails.push({ email: cg }); }
-      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim())) ? disparo.replyTo.trim() : 'midia@coevo.co';
-      if (!toEmails.length) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
-      try {
-        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({ sender: REMETENTE, to: toEmails, ...(ccEmails.length ? { cc: ccEmails } : {}), replyTo: { email: replyToEmail }, tags: ['cobranca', 'cobranca-' + disparoId], subject: buildAssunto(disparo, sc), htmlContent: buildHtml(disparo, item, sc) }) });
+      if (!sc) {
+        console.warn('[emailDisparo] subcliente não encontrado. scId:', scId);
+        erros++;
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
-        if (res.ok) { enviados++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'enviado', emailEnviadoPara: toEmails.map(t => t.email).join(', ') }, { suppressAuth: true }); }
-        else { const errText = await res.text(); console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText); erros++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); }
-      } catch (fetchErr) { console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message); erros++; }
+        if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
+        continue;
+      }
+      const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
+      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) {
+        const cg = disparo.ccGlobal.trim();
+        if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) ccEmails.push({ email: cg });
+      }
+      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim()))
+        ? disparo.replyTo.trim()
+        : 'midia@coevo.co';
+      if (!toEmails.length) {
+        console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
+        erros++;
+        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
+        if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
+        continue;
+      }
+      const emailPayload = {
+        sender: { name: disparo.nomeRemetente || REMETENTE.name, email: REMETENTE.email },
+        to: toEmails,
+        ...(ccEmails.length ? { cc: ccEmails } : {}),
+        replyTo: { email: replyToEmail },
+        tags: ['cobranca', 'cobranca-' + disparoId],
+        subject: buildAssunto(disparo, sc),
+        htmlContent: buildHtml(disparo, item, sc)
+      };
+      try {
+        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
+        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
+        if (res.ok) {
+          enviados++;
+          if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'enviado', emailEnviadoPara: toEmails.map(t => t.email).join(', ') }, { suppressAuth: true });
+        } else {
+          const errText = await res.text();
+          console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText);
+          erros++;
+          if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
+        }
+      } catch (fetchErr) {
+        console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message);
+        erros++;
+      }
     }
     if (pulados > 0) console.warn(`[emailDisparo] ${pulados} itens pulados por já terem sido enviados anteriormente.`);
     const ed = await wixData.get('disparos', disparoId, { suppressAuth: true });
