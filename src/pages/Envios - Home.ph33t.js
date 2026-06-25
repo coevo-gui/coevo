@@ -12,7 +12,8 @@ import {
   enviarDisparos,
   deletarDisparo,
   previewEmailItem,
-  enviarTesteItem
+  enviarTesteItem,
+  obterMetricasDisparo
 } from 'backend/emailDisparo.jsw';
 
 $w.onReady(async () => {
@@ -138,6 +139,21 @@ $w.onReady(async () => {
         case 'DELETE_DISPARO': {
           const result = await deletarDisparo(payload.disparoId);
           reply({ ok: result.ok, error: result.error || null });
+          break;
+        }
+
+        case 'METRICAS_DISPARO': {
+          const result = await obterMetricasDisparo(payload.disparoId);
+          reply({
+            ok:           result.ok,
+            matchedBy:    result.matchedBy,
+            totalEventos: result.totalEventos,
+            disparo:      result.disparo,
+            cms:          result.cms,
+            resumo:       result.resumo,
+            porHotel:     result.porHotel,
+            error:        result.error || null
+          });
           break;
         }
 
