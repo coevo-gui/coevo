@@ -159,10 +159,10 @@ export async function atualizarDisparoConfig(disparoId, config = {}) {
     if (!disparo) return { ok: false, error: 'Disparo não encontrado.' };
     const updated = { ...disparo };
     if (config.textoCorpo !== undefined) updated.textoCorpo = config.textoCorpo;
-    if (config.titulo    !== undefined) updated.titulo    = config.titulo;
+    if (config.titulo     !== undefined) updated.titulo     = config.titulo;
     if (config.plataforma !== undefined) updated.plataforma = config.plataforma;
-    if (config.ccGlobal  !== undefined) updated.ccGlobal  = config.ccGlobal;
-    if (config.replyTo   !== undefined) updated.replyTo   = config.replyTo;
+    if (config.ccGlobal   !== undefined) updated.ccGlobal   = config.ccGlobal;
+    if (config.replyTo    !== undefined) updated.replyTo    = config.replyTo;
     await wixData.update('disparos', updated, { suppressAuth: true });
     return { ok: true };
   } catch (err) {
@@ -184,13 +184,12 @@ export async function deletarDisparo(disparoId) {
 }
 
 function buildAssunto(disparo, sc) {
+  if (disparo.plataforma === 'comunicado') {
+    return disparo.titulo || 'Comunicado';
+  }
   const dataRef = disparo.mesReferencia
     ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR')
     : new Date().toLocaleDateString('pt-BR');
-  if (disparo.plataforma === 'comunicado') {
-    // Assunto do comunicado = exatamente o Título do disparo
-    return disparo.titulo || 'Comunicado';
-  }
   const plat = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || disparo.plataforma || '';
   return `coevo | Cobrança ${plat} | ${sc.sigla} | ${sc.nome} | Cobrança - ref. ${dataRef}`;
 }
@@ -199,29 +198,21 @@ function buildHtml(disparo, item, sc) {
   const valor = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorInvestimento || 0);
   const venc  = disparo.dataVencimento ? new Date(disparo.dataVencimento).toLocaleDateString('pt-BR') : '\u2014';
   const platUpper = { gads: 'GOOGLE ADS', mads: 'META ADS' }[disparo.plataforma] || (disparo.plataforma || '').toUpperCase();
-
   const textoCorpo = disparo.textoCorpo || (disparo.plataforma === 'comunicado'
     ? ''
     : `Estamos enviando este email com o boleto para pagamento do saldo da sua conta <strong>${platUpper}</strong>.`);
-
   const textoCorpoHtml = textoCorpo && !textoCorpo.includes('<')
     ? textoCorpo.split(/\n\n+/).map(p => '<p style="margin:0 0 12px">' + p.replace(/\n/g, '<br>') + '</p>').join('')
     : textoCorpo;
-
   const nomeCompleto = sc.contatoFinanceiro || sc.contatoGerenteGeral || sc.focalMktContato || '';
   const nomeContato = nomeCompleto ? nomeCompleto.trim().split(' ')[0] : '';
   const saudacao = nomeContato
     ? `Oi, ${nomeContato}! Como vai? Por aqui, tudo bem.`
     : `Prezado(a) Parceiro COEVO,`;
-
   const isComunicado = disparo.plataforma === 'comunicado';
-
   const blocoPagamento = item.tipoPagamento === 'pix'
-    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p>
-       <div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
-    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p>
-       <a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
-
+    ? `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">C&oacute;digo PIX:</p><div style="background:#ffffff;border:1px solid #ccd4ff;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;word-break:break-all;color:#002bff;line-height:1.6">${item.pixCode || ''}</div>`
+    : `<p style="margin:0 0 10px;color:#6b7280;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Link do Boleto:</p><a href="${item.boletoUrl || '#'}" style="display:inline-block;background:#002bff;color:#ffffff;font-size:13px;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none">Baixar Boleto &mdash; ${sc.nome}</a>`;
   const blocoCobranca = isComunicado ? '' : `
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f5f7ff;border-left:4px solid #002bff;border-radius:0 12px 12px 0;margin:0 0 20px">
         <tr><td style="padding:20px 24px">
@@ -237,40 +228,8 @@ function buildHtml(disparo, item, sc) {
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:12px;margin:0 0 24px">
         <tr><td style="padding:20px 24px">${blocoPagamento}</td></tr>
       </table>
-      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">
-        Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado, para evitar que a conta fique sem saldo.
-      </p>`;
-
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif">
-<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5">
-<tr><td align="center" style="padding:32px 16px">
-  <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)">
-    <tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff">
-      <img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto">
-    </td></tr>
-    <tr><td style="padding:32px 36px 28px">
-      <p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p>
-      <div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>
-      ${blocoCobranca}
-      <p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p>
-      <p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p>
-    </td></tr>
-    <tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center">
-      <p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">
-        &copy; coevo &middot; conectando vidas &amp; lugares &middot;
-        <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a>
-        &middot;
-        <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a>
-      </p>
-    </td></tr>
-  </table>
-</td></tr>
-</table>
-</body>
-</html>`;
+      <p style="margin:0 0 16px;color:#6b7280;font-size:13px;font-style:italic;line-height:1.6">Por favor, &eacute; importante que seja pago dentro do per&iacute;odo informado, para evitar que a conta fique sem saldo.</p>`;
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head><body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,Helvetica,sans-serif"><table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0f2f5"><tr><td align="center" style="padding:32px 16px"><table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,43,255,0.08)"><tr><td style="background:#ffffff;padding:28px 32px 22px;text-align:center;border-bottom:3px solid #002bff"><img src="${LOGO_URL}" alt="coevo" width="180" style="display:inline-block;max-width:180px;height:auto"></td></tr><tr><td style="padding:32px 36px 28px"><p style="margin:0 0 14px;color:#0a0a1a;font-size:15px;line-height:1.7">${saudacao}</p><div style="margin:0 0 28px;color:#333333;font-size:14px;line-height:1.7">${textoCorpoHtml}</div>${blocoCobranca}<p style="margin:0 0 6px;color:#0a0a1a;font-size:14px">&Eacute; isso! Obrigado pela sua aten&ccedil;&atilde;o! ;)</p><p style="margin:0;color:#0a0a1a;font-size:14px">Equipe <a href="https://coevo.co" style="color:#002bff;font-weight:700;text-decoration:none">coevo.co</a></p></td></tr><tr><td style="background:#0a0a1a;padding:18px 36px;text-align:center"><p style="margin:0;font-size:11px;color:#6b7280;line-height:1.8">&copy; coevo &middot; conectando vidas &amp; lugares &middot; <a href="https://coevo.co" style="color:#002bff;text-decoration:none;font-weight:600">coevo.co</a> &middot; <a href="mailto:midia@coevo.co" style="color:#6b7280;text-decoration:none">midia@coevo.co</a></p></td></tr></table></td></tr></table></body></html>`;
 }
 
 export async function previewEmailItem(disparoId, scId, itemDraft = {}, destinatarios = {}, corpoDraft = null) {
@@ -324,15 +283,14 @@ export async function enviarTesteItem(disparoId, scId, itemDraft = {}, emailsTes
       pixCode: itemDraft.pixCode || '',
       boletoUrl: itemDraft.boletoUrl || ''
     };
-    const emailPayload = {
+    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({
       sender: REMETENTE,
       to: emails.map(email => ({ email, name: 'Teste coevo' })),
       replyTo: { email: (disparo.replyTo && isValidEmail(disparo.replyTo)) ? disparo.replyTo : 'midia@coevo.co' },
       tags: ['cobranca-teste'],
       subject: '[TESTE] ' + buildAssunto(disparo, sc),
       htmlContent: buildHtml(disparo, item, sc)
-    };
-    const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
+    }) });
     if (res.ok) return { ok: true };
     const errText = await res.text();
     console.error('[emailDisparo] enviarTesteItem Brevo', res.status, errText);
@@ -354,69 +312,24 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
     const scIds = [...new Set(itens.map(item => itemScMap[item._id] || item.subclienteRef))].filter(Boolean);
-    const scArr = scIds.length
-      ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null)))
-      : [];
+    const scArr = scIds.length ? await Promise.all(scIds.map(scId => wixData.get('subclientes', scId, { suppressAuth: true }).catch(() => null))) : [];
     const scMap = {};
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
     let enviados = 0, erros = 0;
     for (const item of itens) {
       const scId = itemScMap[item._id] || item.subclienteRef;
       const sc = scMap[scId];
-      if (!sc) {
-        console.warn('[emailDisparo] subcliente não encontrado. scId:', scId);
-        erros++;
-        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
-        if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
-        continue;
-      }
+      if (!sc) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
       const { to: toEmails, cc: ccEmails } = resolverDestinatarios(sc, destinatarios);
-
-      // Adiciona CC global (do disparo) se presente e não duplicado
-      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) {
-        const cg = disparo.ccGlobal.trim();
-        if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) {
-          ccEmails.push({ email: cg });
-        }
-      }
-
-      // Reply-To (padrão: midia@coevo.co)
-      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim()))
-        ? disparo.replyTo.trim()
-        : 'midia@coevo.co';
-
-      if (!toEmails.length) {
-        console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
-        erros++;
-        const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
-        if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
-        continue;
-      }
-      const emailPayload = {
-        sender: REMETENTE,
-        to: toEmails,
-        ...(ccEmails.length ? { cc: ccEmails } : {}),
-        replyTo: { email: replyToEmail },
-        tags: ['cobranca', 'cobranca-' + disparoId],
-        subject: buildAssunto(disparo, sc),
-        htmlContent: buildHtml(disparo, item, sc)
-      };
+      if (disparo.ccGlobal && isValidEmail(disparo.ccGlobal.trim())) { const cg = disparo.ccGlobal.trim(); if (!toEmails.some(t => t.email === cg) && !ccEmails.some(c => c.email === cg)) ccEmails.push({ email: cg }); }
+      const replyToEmail = (disparo.replyTo && isValidEmail(disparo.replyTo.trim())) ? disparo.replyTo.trim() : 'midia@coevo.co';
+      if (!toEmails.length) { erros++; const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null); if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); continue; }
       try {
-        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify(emailPayload) });
+        const res = await fetch(BREVO_URL, { method: 'POST', headers, body: JSON.stringify({ sender: REMETENTE, to: toEmails, ...(ccEmails.length ? { cc: ccEmails } : {}), replyTo: { email: replyToEmail }, tags: ['cobranca', 'cobranca-' + disparoId], subject: buildAssunto(disparo, sc), htmlContent: buildHtml(disparo, item, sc) }) });
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
-        if (res.ok) {
-          enviados++;
-          if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'enviado', emailEnviadoPara: toEmails.map(t => t.email).join(', ') }, { suppressAuth: true });
-        } else {
-          const errText = await res.text();
-          console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText);
-          erros++;
-          if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
-        }
-      } catch (fetchErr) {
-        console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message);
-        erros++;
-      }
+        if (res.ok) { enviados++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'enviado', emailEnviadoPara: toEmails.map(t => t.email).join(', ') }, { suppressAuth: true }); }
+        else { const errText = await res.text(); console.error(`[emailDisparo] Brevo [${sc.sigla}] ${res.status}:`, errText); erros++; if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true }); }
+      } catch (fetchErr) { console.error(`[emailDisparo] fetch error [${sc.sigla}]:`, fetchErr.message); erros++; }
     }
     const ed = await wixData.get('disparos', disparoId, { suppressAuth: true });
     const statusFinal = erros === 0 ? 'enviado' : erros === itens.length ? 'erro' : 'parcial';
@@ -429,21 +342,16 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// DASHBOARD DE ENVIOS — métricas via Brevo (statistics/events)
+// DASHBOARD — métricas via Brevo
 // ─────────────────────────────────────────────────────────────────────
 
 function toYMD(d) {
   const dt = (d instanceof Date) ? d : new Date(d);
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, '0');
-  const day = String(dt.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
 }
 
-// Busca eventos do Brevo com paginação. Filtra por tag (envios novos) ou só por data (fallback).
 async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
-  let all = [];
-  let offset = 0;
+  let all = [], offset = 0;
   const limit = 5000;
   for (let i = 0; i < 6; i++) {
     let url = `${BREVO_EVENTS_URL}?limit=${limit}&offset=${offset}&sort=desc`;
@@ -451,11 +359,7 @@ async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
     if (endDate)   url += `&endDate=${endDate}`;
     if (tag)       url += `&tags=${encodeURIComponent(JSON.stringify([tag]))}`;
     const res = await fetch(url, { method: 'GET', headers });
-    if (!res.ok) {
-      const t = await res.text();
-      console.error('[emailDisparo] Brevo events', res.status, t);
-      break;
-    }
+    if (!res.ok) { const t = await res.text(); console.error('[emailDisparo] Brevo events', res.status, t); break; }
     const data = await res.json();
     const events = data.events || [];
     all = all.concat(events);
@@ -465,63 +369,55 @@ async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
   return all;
 }
 
-// Reduz o conjunto de tipos de evento (lowercase) de um hotel para flags de status.
 function classificarEventos(eventosSet) {
   const has = (...keys) => keys.some(k => eventosSet.has(k));
   return {
     entregue:    has('delivered'),
-    aberto:      has('opened', 'uniqueopened', 'firstopening', 'proxy_open', 'loadedbyproxy', 'uniqueopens'),
-    clicado:     has('clicks', 'click', 'clicked'),
-    bounce:      has('hardbounces', 'softbounces', 'hardbounce', 'softbounce', 'bounce', 'bounces', 'invalid'),
+    aberto:      has('opened','uniqueopened','firstopening','proxy_open','loadedbyproxy','uniqueopens'),
+    clicado:     has('clicks','click','clicked'),
+    bounce:      has('hardbounces','softbounces','hardbounce','softbounce','bounce','bounces','invalid'),
     bloqueado:   has('blocked'),
-    spam:        has('spam', 'spamreports'),
-    erro:        has('error', 'deferred'),
-    desinscrito: has('unsubscribed', 'unsubscribe')
+    spam:        has('spam','spamreports'),
+    erro:        has('error','deferred'),
+    desinscrito: has('unsubscribed','unsubscribe')
   };
 }
 
-// Retorna métricas de um disparo: resumo agregado + por hotel + reconciliação com o CMS.
+function evToCanon(ev) {
+  if (ev === 'delivered') return 'entregue';
+  if (['opened','uniqueopened','firstopening','proxy_open','loadedbyproxy','uniqueopens'].includes(ev)) return 'aberto';
+  if (['clicks','click','clicked'].includes(ev)) return 'clicado';
+  if (['hardbounces','softbounces','hardbounce','softbounce','bounce','bounces','invalid'].includes(ev)) return 'bounce';
+  if (ev === 'blocked') return 'bloqueado';
+  return null;
+}
+
 export async function obterMetricasDisparo(disparoId) {
   try {
     const brevoKey = await getSecret('BREVO_API_KEY');
     if (!brevoKey) return { ok: false, error: 'BREVO_API_KEY vazia no Secrets Manager' };
     const headers = { 'api-key': brevoKey, 'Accept': 'application/json' };
-
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
-
-    // Estado real no CMS (autoritativo para "foi enviado ou não")
     const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
     const itens = itensResult.items;
     const cmsEnviados  = itens.filter(i => i.statusEnvio === 'enviado').length;
     const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
     const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
-
-    // Mapa email -> {sigla, nome} dos subclientes deste disparo (p/ casar comunicados, cujo assunto não tem sigla)
     const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
-    const scResult = scIds.length
-      ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true })
-      : { items: [] };
+    const scResult = scIds.length ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true }) : { items: [] };
     const emailMap = {};
-    const scList = [];
     scResult.items.forEach(sc => {
-      scList.push({ sigla: sc.sigla, nome: sc.nome });
       [sc.emailFinanceiro, sc.emailGerenteGeral, sc.focalMktEmail].forEach(e => {
         if (e && e.includes('@')) String(e).split(/[,\s]+/).forEach(x => { if (x.includes('@')) emailMap[x.trim().toLowerCase()] = { sigla: sc.sigla, nome: sc.nome }; });
       });
     });
-
-    // Janela de datas: do dia de criação do disparo até hoje
     const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
     const startDate = toYMD(created);
     const endDate = toYMD(new Date());
-
-    // 1) Tenta casar por tag (envios novos têm tag cobranca-{disparoId})
     const tag = 'cobranca-' + disparoId;
     let eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
     let matchedBy = 'tag';
-
-    // 2) Fallback para envios antigos (sem tag): filtra por data + assunto
     if (!eventos.length) {
       matchedBy = 'assunto';
       const todos = await fetchBrevoEvents(headers, { startDate, endDate });
@@ -529,76 +425,48 @@ export async function obterMetricasDisparo(disparoId) {
       const refStr = disparo.mesReferencia ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR') : null;
       const tituloLow = (disparo.titulo || '').toLowerCase();
       eventos = todos.filter(e => {
-        const subj = (e.subject || '');
-        const low = subj.toLowerCase();
-        if (disparo.plataforma === 'comunicado') {
-          return tituloLow && low.includes(tituloLow);
-        }
+        const subj = (e.subject || ''); const low = subj.toLowerCase();
+        if (disparo.plataforma === 'comunicado') return tituloLow && low.includes(tituloLow);
         if (!low.includes('cobran')) return false;
         if (platKey && !subj.includes(platKey)) return false;
         if (refStr && !subj.includes(refStr)) return false;
         return true;
       });
     }
-
-    // Agrega por hotel. Cobrança: SIGLA vem do assunto ("coevo | Cobrança X | SIGLA | Nome | ...").
-    // Comunicado: assunto = título (sem sigla), então casa pelo email do destinatário.
     const hoteis = {};
     eventos.forEach(e => {
       let sigla = '(?)', nome = '';
       const parts = (e.subject || '').split(' | ');
-      if (parts.length >= 4 && /cobran/i.test(e.subject || '')) {
-        sigla = parts[2].trim(); nome = parts[3].trim();
-      } else if (e.email && emailMap[String(e.email).toLowerCase()]) {
-        const m = emailMap[String(e.email).toLowerCase()]; sigla = m.sigla; nome = m.nome;
-      }
-      if (!hoteis[sigla]) hoteis[sigla] = { sigla, nome, eventos: new Set(), emails: new Set(), ultimo: null };
+      if (parts.length >= 4 && /cobran/i.test(e.subject || '')) { sigla = parts[2].trim(); nome = parts[3].trim(); }
+      else if (e.email && emailMap[String(e.email).toLowerCase()]) { const m = emailMap[String(e.email).toLowerCase()]; sigla = m.sigla; nome = m.nome; }
+      if (!hoteis[sigla]) hoteis[sigla] = { sigla, nome, eventos: new Set(), emails: new Set(), ultimo: null, porEmail: {} };
       const h = hoteis[sigla];
       const ev = (e.event || '').toLowerCase();
       if (ev) h.eventos.add(ev);
-      if (e.email) h.emails.add(e.email);
-      if (e.date && (!h.ultimo || e.date > h.ultimo)) h.ultimo = e.date;
+      if (e.email) {
+        const emailKey = String(e.email).toLowerCase().trim();
+        h.emails.add(emailKey);
+        if (!h.porEmail[emailKey]) h.porEmail[emailKey] = {};
+        const canon = evToCanon(ev);
+        if (canon && e.date && !h.porEmail[emailKey][canon]) h.porEmail[emailKey][canon] = e.date;
+        if (e.date && (!h.ultimo || e.date > h.ultimo)) h.ultimo = e.date;
+      }
     });
-
     const porHotel = Object.values(hoteis).map(h => {
       const c = classificarEventos(h.eventos);
-      return { sigla: h.sigla, nome: h.nome, emails: [...h.emails], ...c, ultimoEvento: h.ultimo };
+      return { sigla: h.sigla, nome: h.nome, emails: [...h.emails], eventosPorEmail: h.porEmail, ...c, ultimoEvento: h.ultimo };
     }).sort((a, b) => a.sigla.localeCompare(b.sigla));
-
-    // Resumo agregado (contagem por hotel)
     const totalHoteis = porHotel.length;
     const cont = (k) => porHotel.filter(h => h[k]).length;
-    const resumo = {
-      totalHoteis,
-      entregues:  cont('entregue'),
-      aberturas:  cont('aberto'),
-      cliques:    cont('clicado'),
-      bounces:    cont('bounce'),
-      bloqueados: cont('bloqueado'),
-      erros:      cont('erro'),
-      spam:       cont('spam')
-    };
+    const resumo = { totalHoteis, entregues: cont('entregue'), aberturas: cont('aberto'), cliques: cont('clicado'), bounces: cont('bounce'), bloqueados: cont('bloqueado'), erros: cont('erro'), spam: cont('spam') };
     resumo.taxaEntrega  = totalHoteis      ? Math.round(100 * resumo.entregues / totalHoteis) : 0;
     resumo.taxaAbertura = resumo.entregues ? Math.round(100 * resumo.aberturas / resumo.entregues) : 0;
     resumo.taxaClique   = resumo.entregues ? Math.round(100 * resumo.cliques / resumo.entregues) : 0;
-
     return {
-      ok: true,
-      matchedBy,
-      totalEventos: eventos.length,
-      disparo: {
-        id: disparo._id,
-        titulo: disparo.titulo,
-        plataforma: disparo.plataforma,
-        status: disparo.status,
-        totalEnviados: disparo.totalEnviados,
-        criadoPor: disparo.criadoPor,
-        mesReferencia: disparo.mesReferencia,
-        _createdDate: disparo._createdDate
-      },
+      ok: true, matchedBy, totalEventos: eventos.length,
+      disparo: { id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma, status: disparo.status, totalEnviados: disparo.totalEnviados, criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia, _createdDate: disparo._createdDate },
       cms: { totalItens: itens.length, enviados: cmsEnviados, erros: cmsErros, pendentes: cmsPendentes },
-      resumo,
-      porHotel
+      resumo, porHotel
     };
   } catch (err) {
     console.error('[emailDisparo] obterMetricasDisparo:', err.message || err);
@@ -606,7 +474,6 @@ export async function obterMetricasDisparo(disparoId) {
   }
 }
 
-// Correção manual de status do disparo (usada pelo dashboard, ex.: marcar "parcial" como "enviado").
 export async function corrigirStatusDisparo(disparoId, novoStatus) {
   try {
     const permitidos = ['rascunho', 'enviado', 'parcial', 'erro'];
