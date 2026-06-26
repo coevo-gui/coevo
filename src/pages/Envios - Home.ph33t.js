@@ -13,7 +13,8 @@ import {
   deletarDisparo,
   previewEmailItem,
   enviarTesteItem,
-  obterMetricasDisparo
+  obterMetricasDisparo,
+  gerarAnaliseDisparo
 } from 'backend/emailDisparo.jsw';
 
 $w.onReady(async () => {
@@ -152,8 +153,15 @@ $w.onReady(async () => {
             cms:          result.cms,
             resumo:       result.resumo,
             porHotel:     result.porHotel,
+            semEnvios:    result.semEnvios || false,
             error:        result.error || null
           });
+          break;
+        }
+
+        case 'ANALISE_DISPARO': {
+          const result = await gerarAnaliseDisparo(payload.disparoId);
+          reply({ ok: result.ok, analise: result.analise || '', error: result.error || null });
           break;
         }
 

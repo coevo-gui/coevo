@@ -511,6 +511,26 @@ export async function obterMetricasDisparo(disparoId) {
     const cmsEnviados  = itens.filter(i => i.statusEnvio === 'enviado').length;
     const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
     const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
+
+    // Bug fix: sem envios → não busca Brevo (evita falsos positivos por fallback de assunto)
+    if (cmsEnviados === 0) {
+      return {
+        ok: true,
+        matchedBy: 'none',
+        totalEventos: 0,
+        semEnvios: true,
+        disparo: {
+          id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma,
+          status: disparo.status, totalEnviados: disparo.totalEnviados,
+          criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia,
+          _createdDate: disparo._createdDate
+        },
+        cms: { totalItens: itens.length, enviados: 0, erros: cmsErros, pendentes: cmsPendentes },
+        resumo: { totalHoteis: 0, entregues: 0, aberturas: 0, cliques: 0, bounces: 0, bloqueados: 0, erros: 0, spam: 0, taxaEntrega: 0, taxaAbertura: 0, taxaClique: 0 },
+        porHotel: []
+      };
+    }
+
     const scIds = [...new Set(itens.map(i => i.subclienteRef).filter(Boolean))];
     const scResult = scIds.length ? await wixData.query('subclientes').hasSome('_id', scIds).limit(1000).find({ suppressAuth: true }) : { items: [] };
     const emailMap = {};
@@ -591,6 +611,118 @@ export async function corrigirStatusDisparo(disparoId, novoStatus) {
     return { ok: true, status: novoStatus };
   } catch (err) {
     console.error('[emailDisparo] corrigirStatusDisparo:', err.message || err);
+    return { ok: false, error: err.message || String(err) };
+  }
+}
+
+// ─── RESUMO POR IA ───
+
+export async function gerarAnaliseDisparo(disparoId) {
+  try {
+    const anthropicKey = await getSecret('ANTHROPIC_KEY');
+    if (!anthropicKey) return { ok: false, error: 'ANTHROPIC_KEY vazia.' };
+
+    // 1. Métricas do disparo atual (Brevo + CMS)
+    const metricas = await obterMetricasDisparo(disparoId);
+    if (!metricas.ok) return { ok: false, error: metricas.error };
+    if (metricas.semEnvios) return { ok: false, error: 'Nenhum email foi enviado neste disparo.' };
+
+    // 2. Histórico recente (últimos 3 disparos da mesma plataforma, só CMS)
+    const historico = [];
+    try {
+      const hist = await wixData.query('disparos')
+        .eq('plataforma', metricas.disparo.plataforma)
+        .descending('_createdDate')
+        .limit(5)
+        .find({ suppressAuth: true });
+      for (const d of hist.items) {
+        if (d._id === disparoId) continue;
+        const cnt = await wixData.query('itensDisparo').eq('disparoRef', d._id).limit(1000).find({ suppressAuth: true });
+        const env = cnt.items.filter(i => i.statusEnvio === 'enviado').length;
+        const err = cnt.items.filter(i => i.statusEnvio === 'erro').length;
+        historico.push({
+          titulo: d.titulo,
+          data: new Date(d._createdDate).toLocaleDateString('pt-BR'),
+          status: d.status,
+          totalHoteis: cnt.items.length,
+          enviados: env,
+          erros: err
+        });
+        if (historico.length >= 3) break;
+      }
+    } catch (_) { /* histórico é opcional */ }
+
+    // 3. Monta contexto para a IA
+    const { resumo, porHotel, cms, disparo } = metricas;
+    const alertaBounce   = porHotel.filter(h => h.bounce);
+    const alertaBlocked  = porHotel.filter(h => h.bloqueado);
+    const alertaSemEntrega = porHotel.filter(h => !h.entregue && !h.aberto && !h.bounce && !h.bloqueado);
+    const aberturasConfirmadas = porHotel.filter(h => h.aberto && h.entregue);
+    const aberturasScanner = porHotel.filter(h => h.aberto && !h.entregue);
+    const linhaAlerta = (lista, label) => lista.length ? `- ${label}: ${lista.map(h => h.sigla).join(', ')}` : '';
+
+    const contextoAtual = [
+      `DISPARO: ${disparo.titulo} | Plataforma: ${(disparo.plataforma || '').toUpperCase()} | Data: ${new Date(disparo._createdDate).toLocaleDateString('pt-BR')} | Status: ${disparo.status}`,
+      ``,
+      `CMS (sistema):`,
+      `  Hotéis no disparo: ${cms.totalItens} | Enviados: ${cms.enviados} | Erros: ${cms.erros}`,
+      ``,
+      `Brevo (rastreamento de email):`,
+      `  Hotéis rastreados: ${resumo.totalHoteis}`,
+      `  Entregues: ${resumo.entregues} (${resumo.taxaEntrega}%)`,
+      `  Aberturas: ${resumo.aberturas} (${resumo.taxaAbertura}% dos entregues)`,
+      `  Cliques: ${resumo.cliques} (${resumo.taxaClique}% dos entregues)`,
+      `  Bounces: ${resumo.bounces} | Bloqueados: ${resumo.bloqueados}`,
+      ``,
+      `Alertas:`,
+      linhaAlerta(alertaBounce,    'Bounce (endereço inválido)'),
+      linhaAlerta(alertaBlocked,   'Bloqueado pelo provedor'),
+      linhaAlerta(alertaSemEntrega,'Sem entrega nem abertura detectada'),
+      ``,
+      aberturasConfirmadas.length
+        ? `Aberturas confirmadas (entregue + aberto): ${aberturasConfirmadas.map(h => h.sigla).join(', ')}`
+        : 'Aberturas confirmadas: nenhuma',
+      aberturasScanner.length
+        ? `Possíveis aberturas automáticas (scanner, sem entrega confirmada): ${aberturasScanner.map(h => h.sigla).join(', ')}`
+        : ''
+    ].filter(l => l !== '').join('\n');
+
+    const contextoHistorico = historico.length > 0
+      ? `\nHISTÓRICO (mesma plataforma, ${historico.length} disparo${historico.length > 1 ? 's' : ''} anterior${historico.length > 1 ? 'es' : ''}):\n`
+        + historico.map(h => `- ${h.titulo} | ${h.data} | ${h.enviados}/${h.totalHoteis} hotéis enviados | Status: ${h.status}`).join('\n')
+      : '\nHISTÓRICO: sem registros anteriores para comparação.';
+
+    const systemPrompt = `Você é analista de performance de email marketing da Coevo, agência de marketing hoteleiro.
+Analise os dados do disparo e escreva UM parágrafo de análise executiva em português do Brasil.
+Máximo 4 linhas. Sem bullets, sem cabeçalhos, sem formatação markdown. Texto corrido, direto e objetivo.
+Inclua: principais números, comparativo com histórico quando disponível, alertas explícitos se houver.
+Se houver problemas (bounces, bloqueios, sem entrega), mencione primeiro e seja específico (cite as siglas).
+Nota técnica: aberturas sem entrega confirmada são provavelmente scanners automáticos (Microsoft Defender, Apple MPP) e não abertura humana real — mencione se relevante para não gerar expectativa falsa.`;
+
+    const userContent = contextoAtual + contextoHistorico + '\n\nGere o parágrafo de análise:';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 350,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }]
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('[emailDisparo] gerarAnaliseDisparo Anthropic:', response.status, errText);
+      return { ok: false, error: 'Anthropic API ' + response.status };
+    }
+
+    const data = await response.json();
+    const analise = data.content?.[0]?.text || '';
+    return { ok: true, analise };
+  } catch (err) {
+    console.error('[emailDisparo] gerarAnaliseDisparo:', err.message || err);
     return { ok: false, error: err.message || String(err) };
   }
 }
