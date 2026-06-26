@@ -363,6 +363,9 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
+    // Tags distintas por tipo: cobranças usam 'cobranca' / 'cobranca-{id}'; comunicados usam 'comunicado' / 'comunicado-{id}'
+    const tagBase = disparo.plataforma === 'comunicado' ? 'comunicado' : 'cobranca';
+    const tagDisparo = tagBase + '-' + disparoId;
     const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
     const itens = itensResult.items;
     if (!itens.length) return { ok: false, error: 'Nenhum item para: ' + disparoId };
@@ -418,7 +421,7 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         to: toEmails,
         ...(ccEmails.length ? { cc: ccEmails } : {}),
         replyTo: { email: replyToEmail },
-        tags: ['cobranca', 'cobranca-' + disparoId],
+        tags: [tagBase, tagDisparo],
         subject: buildAssunto(disparo, sc),
         htmlContent: buildHtml(disparo, item, sc)
       };
@@ -512,19 +515,11 @@ export async function obterMetricasDisparo(disparoId) {
     const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
     const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
 
-    // Bug fix: sem envios → não busca Brevo (evita falsos positivos por fallback de assunto)
+    // Sem envios: não busca o Brevo
     if (cmsEnviados === 0) {
       return {
-        ok: true,
-        matchedBy: 'none',
-        totalEventos: 0,
-        semEnvios: true,
-        disparo: {
-          id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma,
-          status: disparo.status, totalEnviados: disparo.totalEnviados,
-          criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia,
-          _createdDate: disparo._createdDate
-        },
+        ok: true, matchedBy: 'none', totalEventos: 0, semEnvios: true,
+        disparo: { id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma, status: disparo.status, totalEnviados: disparo.totalEnviados, criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia, _createdDate: disparo._createdDate },
         cms: { totalItens: itens.length, enviados: 0, erros: cmsErros, pendentes: cmsPendentes },
         resumo: { totalHoteis: 0, entregues: 0, aberturas: 0, cliques: 0, bounces: 0, bloqueados: 0, erros: 0, spam: 0, taxaEntrega: 0, taxaAbertura: 0, taxaClique: 0 },
         porHotel: []
@@ -542,24 +537,22 @@ export async function obterMetricasDisparo(disparoId) {
     const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
     const startDate = toYMD(created);
     const endDate = toYMD(new Date());
-    const tag = 'cobranca-' + disparoId;
-    let eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
-    let matchedBy = 'tag';
+    // Tag única por disparo: cobranca-{id} ou comunicado-{id}
+    const tagPrefix = disparo.plataforma === 'comunicado' ? 'comunicado' : 'cobranca';
+    const tag = tagPrefix + '-' + disparoId;
+    const eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
+
+    // Sem fallback por assunto: se a tag não encontrou eventos, retorna semDados
     if (!eventos.length) {
-      matchedBy = 'assunto';
-      const todos = await fetchBrevoEvents(headers, { startDate, endDate });
-      const platKey = { gads: 'Google Ads', mads: 'Meta Ads' }[disparo.plataforma] || '';
-      const refStr = disparo.mesReferencia ? new Date(disparo.mesReferencia).toLocaleDateString('pt-BR') : null;
-      const tituloLow = (disparo.titulo || '').toLowerCase();
-      eventos = todos.filter(e => {
-        const subj = (e.subject || ''); const low = subj.toLowerCase();
-        if (disparo.plataforma === 'comunicado') return tituloLow && low.includes(tituloLow);
-        if (!low.includes('cobran')) return false;
-        if (platKey && !subj.includes(platKey)) return false;
-        if (refStr && !subj.includes(refStr)) return false;
-        return true;
-      });
+      return {
+        ok: true, matchedBy: 'tag', totalEventos: 0, semDados: true,
+        disparo: { id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma, status: disparo.status, totalEnviados: disparo.totalEnviados, criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia, _createdDate: disparo._createdDate },
+        cms: { totalItens: itens.length, enviados: cmsEnviados, erros: cmsErros, pendentes: cmsPendentes },
+        resumo: { totalHoteis: 0, entregues: 0, aberturas: 0, cliques: 0, bounces: 0, bloqueados: 0, erros: 0, spam: 0, taxaEntrega: 0, taxaAbertura: 0, taxaClique: 0 },
+        porHotel: []
+      };
     }
+
     const hoteis = {};
     eventos.forEach(e => {
       let sigla = '(?)', nome = '';
@@ -590,7 +583,7 @@ export async function obterMetricasDisparo(disparoId) {
     resumo.taxaAbertura = resumo.entregues ? Math.round(100 * resumo.aberturas / resumo.entregues) : 0;
     resumo.taxaClique   = resumo.entregues ? Math.round(100 * resumo.cliques / resumo.entregues) : 0;
     return {
-      ok: true, matchedBy, totalEventos: eventos.length,
+      ok: true, matchedBy: 'tag', totalEventos: eventos.length,
       disparo: { id: disparo._id, titulo: disparo.titulo, plataforma: disparo.plataforma, status: disparo.status, totalEnviados: disparo.totalEnviados, criadoPor: disparo.criadoPor, mesReferencia: disparo.mesReferencia, _createdDate: disparo._createdDate },
       cms: { totalItens: itens.length, enviados: cmsEnviados, erros: cmsErros, pendentes: cmsPendentes },
       resumo, porHotel
@@ -625,6 +618,7 @@ export async function gerarAnaliseDisparo(disparoId) {
     const metricas = await obterMetricasDisparo(disparoId);
     if (!metricas.ok) return { ok: false, error: metricas.error };
     if (metricas.semEnvios) return { ok: false, error: 'Nenhum email foi enviado neste disparo.' };
+    if (metricas.semDados) return { ok: false, error: 'Sem dados de rastreamento disponíveis (disparo antigo ou sem tag).' };
 
     const historico = [];
     try {
