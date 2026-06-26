@@ -24,9 +24,21 @@ function resolverDestinatarios(sc, destinatarios = {}) {
     copia:        destinatarios.copia        !== false
   };
   const to = [];
-  if (dest.financeiro   && isValidEmail(sc.emailFinanceiro))   to.push({ email: sc.emailFinanceiro,  name: sc.contatoFinanceiro || sc.nome });
-  if (dest.gerenteGeral && isValidEmail(sc.emailGerenteGeral)) to.push({ email: sc.emailGerenteGeral, name: sc.contatoGerenteGeral || sc.nome });
-  if (dest.focalMkt     && isValidEmail(sc.focalMktEmail))     to.push({ email: sc.focalMktEmail,    name: sc.focalMktContato || sc.nome });
+  if (dest.financeiro && sc.emailFinanceiro) {
+    sc.emailFinanceiro.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
+      if (!to.some(t => t.email === email)) to.push({ email, name: sc.contatoFinanceiro || sc.nome });
+    });
+  }
+  if (dest.gerenteGeral && sc.emailGerenteGeral) {
+    sc.emailGerenteGeral.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
+      if (!to.some(t => t.email === email)) to.push({ email, name: sc.contatoGerenteGeral || sc.nome });
+    });
+  }
+  if (dest.focalMkt && sc.focalMktEmail) {
+    sc.focalMktEmail.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
+      if (!to.some(t => t.email === email)) to.push({ email, name: sc.focalMktContato || sc.nome });
+    });
+  }
   const cc = [];
   if (dest.copia && sc.emailsCopia) {
     sc.emailsCopia.split(/[,\s]+/).map(e => e.trim()).filter(isValidEmail).forEach(email => {
@@ -362,14 +374,14 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
     let enviados = 0, erros = 0, pulados = 0;
     for (const item of itens) {
-      // PROTEÇÃO CONTRA REENVIO: nunca reenviar um item já marcado como enviado no CMS
+      // PROTEÇÃO CONTRA REENVIO
       if (item.statusEnvio === 'enviado') {
         console.warn('[emailDisparo] item já enviado, pulando reenvio:', item._id);
         pulados++;
         enviados++;
         continue;
       }
-      // PROTEÇÃO CONTRA VALOR ZERADO: não envia cobrança sem valor definido
+      // PROTEÇÃO CONTRA VALOR ZERADO
       if (disparo.plataforma !== 'comunicado' && (!item.valorInvestimento || item.valorInvestimento <= 0)) {
         console.warn('[emailDisparo] valorInvestimento ausente/zerado, bloqueando envio:', item._id);
         erros++;
