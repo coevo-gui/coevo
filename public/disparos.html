@@ -189,6 +189,50 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
 .prev-meta b{color:var(--dark)}
 .prev-close{background:transparent;border:1px solid var(--border-m);width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;color:var(--muted);line-height:1}
 .prev-frame{width:100%;height:60vh;border:none;display:block;background:#f0f2f5}
+
+/* ── BADGES (tabela do dashboard) ───────────────────── */
+.badges{display:flex;gap:4px;flex-wrap:wrap}
+.bdg{font-size:10px;font-weight:700;padding:3px 8px;border-radius:7px;white-space:nowrap;cursor:default;letter-spacing:.01em}
+.b-ok{background:#d1fae5;color:#065f46}
+.b-open{background:rgba(0,43,255,0.09);color:var(--blue)}
+.b-click{background:rgba(123,47,212,0.12);color:#7b2fd4}
+.b-bounce{background:#fde68a;color:#78350f}
+.b-block{background:#fee2e2;color:#991b1b}
+.b-none{background:#eceef3;color:#8a90a0}
+.last{color:var(--muted);font-size:11.5px;font-weight:600;white-space:nowrap}
+/* Tabela do dashboard (sem class .tbl) */
+#dashContent table{width:100%;border-collapse:collapse}
+#dashContent thead th{text-align:left;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;padding:0 12px 10px;border-bottom:1px solid var(--border)}
+#dashContent tbody td{padding:10px 12px;border-bottom:1px solid #f0f1f6;font-size:13px;vertical-align:middle}
+#dashContent tbody tr:last-child td{border-bottom:none}
+#dashContent tbody tr:hover td{background:#fafcfb}
+
+/* ── DASHBOARD ───────────────────────────────────────── */
+.db-kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:16px 0}
+@media(max-width:820px){.db-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:480px){.db-kpis{grid-template-columns:repeat(2,1fr)}}
+.db-kpi{background:#fff;border:1px solid var(--border);border-radius:13px;padding:12px 13px;position:relative;overflow:hidden}
+.db-kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c,var(--blue))}
+.db-kpi .n{font-size:24px;font-weight:700;line-height:1}
+.db-kpi .l{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-top:6px}
+.db-kpi .r{font-size:11px;font-weight:700;color:var(--c,var(--blue));margin-top:2px}
+.db-funil{display:flex;flex-direction:column;gap:7px}
+.db-fl{display:flex;align-items:center;gap:10px}
+.db-fl .cap{width:80px;font-size:11.5px;font-weight:700;color:var(--muted);text-align:right;flex:0 0 80px}
+.db-fl .track{flex:1;background:#f1f3f9;border-radius:8px;height:26px;overflow:hidden}
+.db-fl .fill{height:100%;border-radius:8px;display:flex;align-items:center;padding:0 9px;color:#fff;font-size:11.5px;font-weight:700;min-width:34px}
+.db-recon{font-size:12px;font-weight:600;background:#f7f9ff;border:1px dashed #c9d3ff;border-radius:10px;padding:10px 14px;margin:8px 0 12px;color:#334;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.db-recon b{color:var(--dark)}.db-dot{width:4px;height:4px;border-radius:50%;background:#a9b4d0;display:inline-block;margin:0 3px}
+.db-chips{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0 10px}
+.db-chip{border:1px solid #e2e4f0;background:#fff;border-radius:16px;padding:5px 12px;font-size:11.5px;font-weight:700;cursor:pointer;color:#475}
+.db-chip:hover{border-color:var(--blue)}.db-chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.db-chip .c{opacity:.65;margin-left:4px}
+.db-src{font-size:11px;color:var(--light);font-weight:600;margin-top:16px;padding-top:12px;border-top:1px solid var(--border);line-height:1.7}
+/* Tooltip box */
+#ttBox{display:none;position:fixed;background:#0a0a1a;color:#fff;border-radius:10px;padding:10px 14px;font-size:11.5px;font-family:'Raleway',sans-serif;z-index:9000;max-width:320px;pointer-events:none;line-height:1.75;box-shadow:0 4px 20px rgba(0,0,0,0.45)}
+/* Badge de status clicável na lista */
+.pill.pclk{cursor:pointer;text-decoration:underline dotted rgba(0,0,0,0.3);transition:opacity .1s}
+.pill.pclk:hover{opacity:.72}
 </style>
 </head>
 <body>
@@ -266,6 +310,8 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
   </div>
 </div>
 
+<div id="ttBox"></div>
+
 <div class="wrap">
 
   <div class="stepper">
@@ -286,6 +332,7 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn-ghost" id="btnRefresh" onclick="refreshLista()" title="Atualizar lista">↻ Atualizar</button>
+          <button class="btn-ghost" onclick="abrirDashboard(null)" title="Ver métricas de envios">📊 Dashboard</button>
           <button class="btn-blue" onclick="iniciarNovoDisparo()">+ Novo Disparo</button>
         </div>
       </div>
@@ -315,18 +362,13 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
         <table class="tbl" style="min-width:820px">
           <thead>
             <tr>
-              <th class="srt" style="width:26%" onclick="setSortCol('titulo')">Título <span class="si" id="si_titulo">⇅</span></th>
-              <th class="srt" style="width:7%" onclick="setSortCol('plataforma')">Plat. <span class="si" id="si_plataforma">⇅</span></th>
-              <th class="srt" style="width:9%" onclick="setSortCol('mesReferencia')">Mês ref. <span class="si" id="si_mesReferencia">⇅</span></th>
-              <th class="srt" style="width:10%" onclick="setSortCol('dataVencimento')">Vencimento <span class="si" id="si_dataVencimento">⇅</span></th>
-              <th class="srt" style="width:6%;text-align:center" onclick="setSortCol('_totalItens')">Hotéis <span class="si" id="si__totalItens">⇅</span></th>
-              <th class="srt" style="width:10%" onclick="setSortCol('status')">Status <span class="si" id="si_status">⇅</span></th>
-              <th class="srt srt-on" style="width:13%" onclick="setSortCol('_updatedDate')">Criado / Atualizado <span class="si" id="si__updatedDate">▼</span></th>
-              <th style="width:19%"></th>
+              <th class="srt" style="min-width:260px" onclick="setSortCol('titulo')">Disparo <span class="si" id="si_titulo">⇅</span></th>
+              <th class="srt" style="width:160px;text-align:right" onclick="setSortCol('_updatedDate')">Criado / Atualizado <span class="si srt-on" id="si__updatedDate">▼</span></th>
+              <th style="width:220px;text-align:right">Status / Ação</th>
             </tr>
           </thead>
           <tbody id="disparosList">
-            <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum disparo encontrado.</td></tr>
+            <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum disparo encontrado.</td></tr>
           </tbody>
         </table>
       </div>
@@ -348,13 +390,19 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
         </div>
       </div>
 
-      <div class="frow">
+      <div class="frow" id="rowMesVenc">
         <div class="fg"><label>Mês de referência <span class="tip" data-tip="Mês a que se referem os investimentos desta cobrança. Aparece no assunto do email e no título gerado automaticamente.">i</span></label><input type="month" id="inputMesRef" oninput="updateTitle()"></div>
         <div class="fg"><label>Data de vencimento <span class="tip" data-tip="Prazo de pagamento. Aparece em destaque no card de cobrança do email enviado ao hotel.">i</span></label><input type="date" id="inputVencimento"></div>
       </div>
-      <div class="fg" style="margin-bottom:14px">
-        <label>Título do disparo <span class="tip" data-tip="Nome interno do disparo — visível apenas para a equipe coevo. Gerado automaticamente ao preencher mês, pode ser editado.">i</span></label>
-        <input type="text" id="inputTitulo" placeholder="Cobrança GAds – Jun/2026">
+      <div class="frow" style="margin-bottom:14px">
+        <div class="fg">
+          <label id="labelTitulo">Assunto do email / Título do disparo <span class="tip" data-tip="Para comunicados: é o assunto exato do email enviado. Para cobranças: é o nome interno — o assunto é gerado automaticamente com sigla, plataforma e mês de referência.">i</span></label>
+          <input type="text" id="inputTitulo" placeholder="Ex: Comunicado coevo – Junho 2026">
+        </div>
+        <div class="fg">
+          <label>Nome do remetente <span class="tip" data-tip="Nome de exibição do remetente. O endereço permanece midia@coevo.co. Padrão: Mídia coevo">i</span></label>
+          <input type="text" id="inputNomeRemetente" placeholder="Mídia coevo" value="Mídia coevo">
+        </div>
       </div>
       <div class="fg" style="margin-bottom:20px">
         <label>Texto do corpo do email <span class="tip" data-tip="Para cobranças: descreve o motivo do envio (ex: saldo da conta Google Ads). Para comunicados: é o conteúdo principal da mensagem enviada.">i</span></label>
@@ -495,6 +543,36 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
     </div>
   </div>
 
+  <!-- ══ TELA 4: DASHBOARD ════════════════════════════════ -->
+  <div class="screen" id="scrDash">
+    <div class="card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:20px">
+        <div>
+          <h1 class="page-title">📊 Dashboard de Envios</h1>
+          <p class="page-sub">Métricas de entrega, abertura e cliques — Brevo</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="selDispDash" style="min-width:260px;border:1.5px solid #e2e4f0;background:#fff;border-radius:10px;padding:8px 32px 8px 12px;font-size:13px;font-weight:600;font-family:inherit;color:var(--dark);cursor:pointer;appearance:none;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%227%22 viewBox=%220 0 10 7%22%3E%3Cpath d=%22M1 1l4 4 4-4%22 stroke=%22%236b7280%22 stroke-width=%221.6%22 fill=%22none%22 stroke-linecap=%22round%22/%3E%3C/svg%3E');background-repeat:no-repeat;background-position:right 11px center"></select>
+          <button class="btn-ghost" onclick="atualizarDash()">↻ Atualizar</button>
+          <button class="btn-ghost" id="btnAnaliseIA" onclick="gerarAnalise()" style="display:none;gap:5px;align-items:center;margin-left:auto" title="Gerar análise executiva com IA">✨ Análise IA</button>
+          <button class="btn-ghost" onclick="goTo(1)">← Disparos</button>
+        </div>
+      </div>
+      <div id="aiCard" style="display:none;background:#f5f7ff;border:1.5px solid #ccd4ff;border-radius:12px;padding:18px 22px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:15px">✨</span>
+          <span style="font-weight:700;font-size:13px;color:var(--blue)">Resumo por IA</span>
+          <span id="aiCardStatus" style="font-size:11px;color:var(--muted);margin-left:auto"></span>
+        </div>
+        <p id="aiCardText" style="margin:0;font-size:13px;color:#333;line-height:1.7;white-space:pre-line"></p>
+      </div>
+      <div id="dashContent" style="min-height:200px">
+        <div style="text-align:center;padding:40px;color:var(--muted)">Selecione um disparo acima.</div>
+      </div>
+      <p class="db-src">ℹ Dados do <b>Brevo</b> (plataforma de email da coevo) — consultados em tempo real a cada atualização. Aberturas e cliques são detectados por pixel de rastreamento; clientes com imagens desativadas podem não aparecer como "Aberto" mesmo que tenham lido. Os números por hotel consolidam todos os emails cadastrados naquele subcliente.</p>
+    </div>
+  </div>
+
 </div><!-- /wrap -->
 
 <script>
@@ -553,8 +631,8 @@ function veloCall(type, payload) {
     var id = ++_msgId;
     var timer = setTimeout(function() {
       delete _pending[id];
-      reject(new Error('Timeout (' + type + '): Velo não respondeu em 15s.'));
-    }, 15000);
+      reject(new Error('Timeout (' + type + '): Velo n\u00e3o respondeu em 300s.'));
+    }, 300000);
     _pending[id] = function(data) {
       clearTimeout(timer);
       if (data.error) reject(new Error(data.error));
@@ -754,44 +832,56 @@ function renderDisparosList() {
   updateSortIcons();
   var tbody = document.getElementById('disparosList');
   if (!lista.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum disparo encontrado.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:24px;font-size:13px">Nenhum disparo encontrado.</td></tr>';
     return;
   }
-  var platLabels = { gads: 'GAds', mads: 'MAds', ambas: 'Ambas' };
+  var platLabels = { gads: 'Google Ads', mads: 'Meta Ads', comunicado: 'Comunicado' };
+  var platCls    = { gads: 'p-gads', mads: 'p-mads', comunicado: 'p-comm' };
   var statusMap = {
-    rascunho: { cls: 'p-draft', txt: 'Rascunho' },
-    enviado:  { cls: 'p-sent',  txt: '\u2713 Enviado' },
-    parcial:  { cls: 'p-part',  txt: '\u26a0 Parcial' },
-    erro:     { cls: 'p-err',   txt: '\u2717 Erro' }
+    rascunho: { cls: 'p-draft', txt: 'Rascunho',     bdr: '#b0b8d0' },
+    enviado:  { cls: 'p-sent',  txt: '\u2713 Enviado', bdr: '#0a7a5c' },
+    parcial:  { cls: 'p-part',  txt: '\u26a0 Parcial', bdr: '#f2b705' },
+    erro:     { cls: 'p-err',   txt: '\u2717 Erro',    bdr: '#f25252' }
   };
   tbody.innerHTML = lista.map(function(d) {
-    var pl = platLabels[d.plataforma] || d.plataforma || '\u2014';
-    var plCls = d.plataforma === 'mads' ? 'p-mads' : 'p-gads';
-    var mes  = d.mesReferencia  ? fmtDate(d.mesReferencia,  { month: 'short', year: 'numeric' }) : '\u2014';
-    var venc = d.dataVencimento ? fmtDate(d.dataVencimento) : '\u2014';
-    var st = statusMap[d.status] || { cls: 'p-pend', txt: d.status || '\u2014' };
-    var criado = d._createdDate ? fmtDateTime(d._createdDate) : '\u2014';
-    var atualiz = d._updatedDate ? fmtDateTime(d._updatedDate) : '\u2014';
-    // Só mostra "Atualizado" se diferente de "Criado" (resolução de 1 minuto)
-    var mostrarAtualiz = atualiz !== criado && atualiz !== '\u2014';
+    var pl  = platLabels[d.plataforma] || d.plataforma || '';
+    var pCls = platCls[d.plataforma] || 'p-gads';
+    var st  = statusMap[d.status] || { cls: 'p-pend', txt: d.status || '\u2014', bdr: '#b0b8d0' };
+
+    // Linha de subtítulo: plataforma + hotéis + mês ref (se houver) + data criação
+    var sub = [];
+    if (d._totalItens != null) sub.push(d._totalItens + ' hot\u00e9' + (d._totalItens === 1 ? 'l' : 'is'));
+    if (d.mesReferencia) sub.push(fmtDate(d.mesReferencia, { month: 'long', year: 'numeric' }));
+    if (d.dataVencimento) sub.push('venc. ' + fmtDate(d.dataVencimento));
+    var dataStr = d._createdDate ? fmtDateTime(d._createdDate) : '';
+    var atualizStr = (d._updatedDate && d._updatedDate !== d._createdDate) ? 'atualiz. ' + fmtDateTime(d._updatedDate) : '';
+    var criadorStr = d.criadoPor || '';
+
     var btn = d.status === 'rascunho' || !d.status
-      ? '<button class="btn-blue" style="font-size:11px;padding:5px 11px" onclick="verDetalhe(\'' + d._id + '\')">Continuar \u2192</button>'
-      : '<button class="btn-yellow" style="font-size:11px;padding:4px 11px" onclick="verDetalhe(\'' + d._id + '\')">Ver detalhes \u2192</button>';
-    return '<tr>'
-      + '<td style="font-weight:700;font-size:12.5px">' + esc(d.titulo || '\u2014') + '</td>'
-      + '<td><span class="pill ' + plCls + '">' + pl + '</span></td>'
-      + '<td style="color:var(--muted);font-size:12px">' + mes + '</td>'
-      + '<td style="color:var(--muted);font-size:12px">' + venc + '</td>'
-      + '<td style="text-align:center;font-weight:700">' + (d._totalItens != null ? d._totalItens : '\u2014') + '</td>'
-      + '<td><span class="pill ' + st.cls + '">' + st.txt + '</span></td>'
-      + '<td style="font-size:11px;color:var(--muted);line-height:1.6">'
-      +   '<span style="display:block">' + criado + '</span>'
-      +   (mostrarAtualiz ? '<span style="display:block;color:var(--light)">atualiz. ' + atualiz + '</span>' : '')
-      +   (d.criadoPor ? '<span style="display:block;color:var(--blue);font-weight:600;margin-top:2px;font-size:9.5px">' + esc(d.criadoPor) + '</span>' : '')
+      ? '<button class="btn-blue" style="font-size:11px;padding:5px 11px;white-space:nowrap" onclick="verDetalhe(\'' + d._id + '\')">Continuar \u2192</button>'
+      : '<button class="btn-yellow" style="font-size:11px;padding:4px 11px;white-space:nowrap" onclick="verDetalhe(\'' + d._id + '\')">Ver detalhes \u2192</button>';
+
+    return '<tr style="border-left:3px solid ' + st.bdr + '">'
+      + '<td style="padding-left:14px;min-width:180px">'
+      +   '<div style="font-weight:700;font-size:13px;margin-bottom:3px">' + esc(d.titulo || '\u2014') + '</div>'
+      +   '<div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">'
+      +     '<span class="pill ' + pCls + '" style="font-size:10px;padding:1px 7px">' + pl + '</span>'
+      +     (sub.length ? '<span style="font-size:11px;color:var(--muted)">' + sub.join(' \u00b7 ') + '</span>' : '')
+      +   '</div>'
       + '</td>'
-      + '<td style="white-space:nowrap">'
+      + '<td style="text-align:right">'
+      +   '<div style="font-size:11px;color:var(--muted);line-height:1.7">'
+      +     (dataStr ? '<span style="display:block">' + dataStr + '</span>' : '')
+      +     (atualizStr ? '<span style="display:block;color:var(--light)">' + atualizStr + '</span>' : '')
+      +     (criadorStr ? '<span style="display:block;color:var(--blue);font-weight:600;font-size:9.5px">' + esc(criadorStr) + '</span>' : '')
+      +   '</div>'
+      + '</td>'
+      + '<td style="white-space:nowrap;text-align:right">'
+      +   '<span class="pill ' + st.cls + (d.status !== 'rascunho' ? ' pclk' : '') + '"'
+      +   (d.status !== 'rascunho' ? ' onclick="abrirDashboard(\'' + d._id + '\')" title="Ver m\u00e9tricas"' : '')
+      +   ' style="margin-right:6px">' + st.txt + '</span>'
       +   btn
-      +   '&nbsp;<button class="btn-del" id="del_' + d._id + '" onclick="handleDelete(\'' + d._id + '\',this)">🗑</button>'
+      +   '&nbsp;<button class="btn-del" id="del_' + d._id + '" onclick="handleDelete(\'' + d._id + '\',this)">\uD83D\uDDD1</button>'
       + '</td>'
       + '</tr>';
   }).join('');
@@ -907,6 +997,7 @@ function toggleSC(id) {
 function updateSCCounter() {
   var n = S.selectedIds.length;
   document.getElementById('scCounter').textContent = '\u2014 ' + n + ' selecionado' + (n !== 1 ? 's' : '');
+  updateTitle(); // atualiza o título com o número de hotéis selecionados
 }
 
 function selectAllSC() {
@@ -958,10 +1049,17 @@ function renderBillingTable() {
   var tbody = document.getElementById('billingTbody');
   tbody.innerHTML = S.currentItens.map(function(item, idx) {
     var sc = item._sc || {};
-    var isPix = (item.tipoPagamento || 'boleto') === 'pix';
-    var val = item.valorInvestimento != null ? item.valorInvestimento : 0;
-    var dados = isPix ? (item.pixCode || '') : (item.boletoUrl || '');
-    var filled = dados.trim().length > 8;
+    // Aplica overlay de S.changes (edições não-salvas) sobre os dados originais do item
+    var c = S.changes[idx] || {};
+    var tipoPag = c.tipoPagamento != null ? c.tipoPagamento : (item.tipoPagamento || 'boleto');
+    var val = c.valorInvestimento != null ? c.valorInvestimento : (item.valorInvestimento != null ? item.valorInvestimento : 0);
+    var pixCode = c.pixCode != null ? c.pixCode : (item.pixCode || '');
+    var boletoUrl = c.boletoUrl != null ? c.boletoUrl : (item.boletoUrl || '');
+    var isPix = tipoPag === 'pix';
+    var dados = isPix ? pixCode : boletoUrl;
+    var filled = dados.trim().length > 8 && val > 0;
+    var stCls = val <= 0 ? 'p-err' : (filled ? 'p-sent' : 'p-pend');
+    var stTxt = val <= 0 ? '\u26a0 Sem valor' : (filled ? '\u2713 Preenchido' : '\u25cf Pendente');
     return '<tr>'
       + '<td><div style="font-weight:700;font-size:13px">' + esc(sc.nome || '\u2014') + '</div>'
       + '<span class="sig ' + siglaColor(sc.sigla) + '">' + esc(sc.sigla || '?') + '</span></td>'
@@ -973,7 +1071,7 @@ function renderBillingTable() {
       + '<td><input class="ri" id="d_' + idx + '" type="' + (isPix ? 'text' : 'url') + '" value="' + esc(dados) + '"'
       + ' placeholder="' + (isPix ? 'Cole o c\u00f3digo PIX aqui...' : 'https://boleto.banco.com.br/...') + '"'
       + ' oninput="onDados(this,' + idx + ')"></td>'
-      + '<td><span class="pill ' + (filled ? 'p-sent' : 'p-pend') + '" id="st_' + idx + '">' + (filled ? '\u2713 Preenchido' : '\u25cf Pendente') + '</span></td>'
+      + '<td><span class="pill ' + stCls + '" id="st_' + idx + '">' + stTxt + '</span></td>'
       + '<td style="text-align:center"><button class="btn-rm-item" id="rmBtn_' + idx + '" onclick="removerItemDisparo(' + idx + ')" title="Remover este hotel do disparo">\u00d7</button></td>'
       + '</tr>';
   }).join('');
@@ -1052,12 +1150,33 @@ function updateScreen3Header(disparo) {
   document.getElementById('s3Venc').textContent = disparo.dataVencimento ? fmtDate(disparo.dataVencimento) : '\u2014';
   // Para comunicado: esconde tabela de cobranças e mostra modo comunicado
   var isComunicado = disparo.plataforma === 'comunicado';
+  var jaEnviado = disparo.status === 'enviado' || disparo.status === 'parcial';
   document.getElementById('billingSection').style.display = isComunicado ? 'none' : '';
   document.getElementById('comunicadoSection').style.display = isComunicado ? '' : 'none';
-  document.getElementById('progbox3').style.display = isComunicado ? 'none' : '';
+  document.getElementById('progbox3').style.display = (isComunicado || jaEnviado) ? 'none' : '';
   var instrEl = document.getElementById('instrucaoPreench');
-  if (instrEl) instrEl.style.display = isComunicado ? 'none' : '';
-  document.getElementById('btnEnviar').disabled = !isComunicado; // comunicado: sempre habilitado; cobrança: aguarda progresso
+  if (instrEl) instrEl.style.display = (isComunicado || jaEnviado) ? 'none' : '';
+  var btnEnv = document.getElementById('btnEnviar');
+  if (jaEnviado) {
+    btnEnv.disabled = true;
+    btnEnv.style.display = 'none';
+    var avisoEnv = document.getElementById('avisoJaEnviado');
+    if (!avisoEnv) {
+      avisoEnv = document.createElement('div');
+      avisoEnv.id = 'avisoJaEnviado';
+      avisoEnv.style.cssText = 'background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:10px 16px;font-size:12.5px;font-weight:700;color:#9a3412;display:flex;align-items:center;gap:8px';
+      avisoEnv.innerHTML = '\u26a0\ufe0f Este disparo j\u00e1 foi enviado (status: <b style="text-transform:capitalize">' + disparo.status + '</b>). Reenviar causaria duplicatas nos hot\u00e9is. Use o Dashboard para ver os resultados.';
+      btnEnv.parentNode.insertBefore(avisoEnv, btnEnv);
+    } else {
+      avisoEnv.innerHTML = '\u26a0\ufe0f Este disparo j\u00e1 foi enviado (status: <b style="text-transform:capitalize">' + disparo.status + '</b>). Reenviar causaria duplicatas nos hot\u00e9is. Use o Dashboard para ver os resultados.';
+      avisoEnv.style.display = 'flex';
+    }
+  } else {
+    btnEnv.style.display = '';
+    var avisoEnv2 = document.getElementById('avisoJaEnviado');
+    if (avisoEnv2) avisoEnv2.style.display = 'none';
+    btnEnv.disabled = !isComunicado;
+  }
 }
 
 function setPay(idx, type, btn) {
@@ -1083,15 +1202,34 @@ function onDados(inp, idx) {
   var tipo = S.changes[idx].tipoPagamento || S.currentItens[idx].tipoPagamento || 'boleto';
   if (tipo === 'pix') { S.changes[idx].pixCode = inp.value; }
   else { S.changes[idx].boletoUrl = inp.value; }
-  var filled = inp.value.trim().length > 8;
+  var c = S.changes[idx];
+  var val = c.valorInvestimento !== undefined ? c.valorInvestimento : (S.currentItens[idx].valorInvestimento || 0);
+  var filled = inp.value.trim().length > 8 && val > 0;
   var st = document.getElementById('st_' + idx);
-  if (st) { st.className = 'pill ' + (filled ? 'p-sent' : 'p-pend'); st.textContent = filled ? '\u2713 Preenchido' : '\u25cf Pendente'; }
+  if (st) {
+    st.className = 'pill ' + (val <= 0 ? 'p-err' : filled ? 'p-sent' : 'p-pend');
+    st.textContent = val <= 0 ? '\u26a0 Sem valor' : (filled ? '\u2713 Preenchido' : '\u25cf Pendente');
+  }
   updateProgresso();
 }
 
 function onValor(inp, idx) {
   ensureChange(idx);
-  S.changes[idx].valorInvestimento = parseFloat(inp.value) || 0;
+  var novoVal = parseFloat(inp.value) || 0;
+  S.changes[idx].valorInvestimento = novoVal;
+  // Reavalia badge: pode desbloquear ou bloquear dependendo se valor foi zerado/preenchido
+  var c = S.changes[idx];
+  var tipo = c.tipoPagamento || S.currentItens[idx].tipoPagamento || 'boleto';
+  var dados = tipo === 'pix'
+    ? (c.pixCode !== undefined ? c.pixCode : (S.currentItens[idx].pixCode || ''))
+    : (c.boletoUrl !== undefined ? c.boletoUrl : (S.currentItens[idx].boletoUrl || ''));
+  var filled = dados.trim().length > 8 && novoVal > 0;
+  var st = document.getElementById('st_' + idx);
+  if (st) {
+    st.className = 'pill ' + (novoVal <= 0 ? 'p-err' : filled ? 'p-sent' : 'p-pend');
+    st.textContent = novoVal <= 0 ? '\u26a0 Sem valor' : (filled ? '\u2713 Preenchido' : '\u25cf Pendente');
+  }
+  updateProgresso();
 }
 
 function ensureChange(idx) {
@@ -1106,7 +1244,8 @@ function updateProgresso() {
     var dados = tipo === 'pix'
       ? (c.pixCode !== undefined ? c.pixCode : item.pixCode)
       : (c.boletoUrl !== undefined ? c.boletoUrl : item.boletoUrl);
-    return (dados || '').trim().length > 8;
+    var val = c.valorInvestimento !== undefined ? c.valorInvestimento : (item.valorInvestimento || 0);
+    return (dados || '').trim().length > 8 && val > 0;
   }).length;
   document.getElementById('progPend').textContent = '\u25cf ' + (total - preenchidos) + ' pendente' + ((total - preenchidos) !== 1 ? 's' : '');
   document.getElementById('progOk').textContent = '\u25cf ' + preenchidos + ' preenchido' + (preenchidos !== 1 ? 's' : '');
@@ -1157,11 +1296,12 @@ function handleContinuar() {
   };
   S.ccGlobal = (document.getElementById('inputCCGlobal').value || '').trim();
   S.replyTo  = (document.getElementById('inputReplyTo').value  || '').trim() || 'midia@coevo.co';
+  S.nomeRemetente = (document.getElementById('inputNomeRemetente').value || '').trim() || 'M\u00eddia coevo';
 
   // Se já criou disparo nesta sessão, não cria outro — evita rascunhos duplicados
   if (S.currentDisparoId) {
     // Persiste textoCorpo atualizado (pode ter mudado desde CREATE_DISPARO)
-    veloCall('ATUALIZAR_DISPARO', { disparoId: S.currentDisparoId, config: { textoCorpo: getCorpoHTML(), plataforma: S.plataforma, ccGlobal: S.ccGlobal, replyTo: S.replyTo } });
+    veloCall('ATUALIZAR_DISPARO', { disparoId: S.currentDisparoId, config: { textoCorpo: getCorpoHTML(), plataforma: S.plataforma, ccGlobal: S.ccGlobal, replyTo: S.replyTo, nomeRemetente: S.nomeRemetente } });
     updateScreen3Header({ plataforma: S.plataforma });
     renderBillingTable();
     goTo(3);
@@ -1177,6 +1317,7 @@ function handleContinuar() {
     textoCorpo:    getCorpoHTML(),
     ccGlobal:      S.ccGlobal,
     replyTo:       S.replyTo,
+    nomeRemetente: S.nomeRemetente,
     subclienteIds: S.selectedIds.slice()
   }).then(function(res) {
     S.currentDisparoId = res.disparoId;
@@ -1202,12 +1343,15 @@ function verDetalhe(disparoId) {
     S.plataforma = res.disparo.plataforma || 'gads';
     S.ccGlobal = res.disparo.ccGlobal || '';
     S.replyTo  = res.disparo.replyTo  || 'midia@coevo.co';
+    S.nomeRemetente = res.disparo.nomeRemetente || 'M\u00eddia coevo';
     // Preenche editor rich text com o textoCorpo do disparo existente
     setCorpoHTML(res.disparo.textoCorpo || '');
     var ccEl = document.getElementById('inputCCGlobal');
     if (ccEl) ccEl.value = S.ccGlobal;
     var rtEl = document.getElementById('inputReplyTo');
     if (rtEl) rtEl.value = S.replyTo;
+    var nrEl = document.getElementById('inputNomeRemetente');
+    if (nrEl) nrEl.value = S.nomeRemetente;
     updateScreen3Header(res.disparo);
     renderBillingTable();
     goTo(3);
@@ -1256,6 +1400,20 @@ function destLabels() {
 }
 
 function openReviewModal() {
+  var jaEnviado = S.currentDisparoId &&
+    S.disparos.some(function(d) { return d._id === S.currentDisparoId && (d.status === 'enviado' || d.status === 'parcial'); });
+
+  // Aviso de disparo já enviado
+  var avisoRev = document.getElementById('revAvisoReenvio');
+  if (!avisoRev) {
+    avisoRev = document.createElement('div');
+    avisoRev.id = 'revAvisoReenvio';
+    avisoRev.style.cssText = 'background:#fef2f2;border:1.5px solid #fca5a5;border-radius:12px;padding:14px 16px;display:flex;gap:11px;align-items:flex-start;margin-bottom:16px';
+    avisoRev.innerHTML = '<span style="font-size:18px;flex-shrink:0">\uD83D\uDEA8</span><div><b style="color:#7f1d1d;font-size:13px">ATENÇÃO — Disparo já enviado</b><p style="color:#991b1b;font-size:12.5px;margin:4px 0 0;line-height:1.5">Este disparo tem status <b>enviado/parcial</b>. Confirmar novamente enviará emails duplicados para os hotéis. Os itens com statusEnvio=\'enviado\' serão bloqueados pelo backend, mas itens com erro ou pendentes serão reenviados.</p></div>';
+    var revBody = document.querySelector('.rev-body');
+    if (revBody) revBody.insertBefore(avisoRev, revBody.firstChild);
+  }
+  avisoRev.style.display = jaEnviado ? 'flex' : 'none';
   // Resumo de destinatários
   var labels = destLabels();
   document.getElementById('revDestTags').innerHTML = labels.length
@@ -1266,7 +1424,7 @@ function openReviewModal() {
   var itens = buildItensPayload();
   var isComunicado = S.plataforma === 'comunicado';
   document.getElementById('revCount').textContent = itens.length;
-  document.getElementById('revRealCount').textContent = itens.length + (isComunicado ? ' hotel' : ' hotel') + (itens.length !== 1 ? 'éis' : '');
+  document.getElementById('revRealCount').textContent = itens.length + (itens.length !== 1 ? ' hot\u00e9is' : ' hotel');
   // Título da seção adaptado para comunicado
   var revSecTitle = document.querySelector('#reviewModal .rev-sec-t');
   if (revSecTitle) revSecTitle.textContent = isComunicado
@@ -1390,7 +1548,8 @@ function handleEnviar() {
   veloCall('ENVIAR_DISPAROS', {
     disparoId:    S.currentDisparoId,
     itens:        buildItensPayload(),
-    destinatarios: S.destinatarios
+    destinatarios: S.destinatarios,
+    nomeRemetente: S.nomeRemetente || 'M\u00eddia coevo'
   }).then(function(res) {
     if (res.ok) {
       showFeedback('success', '\u2713 ' + res.enviados + ' email(s) enviado(s) com sucesso!');
@@ -1401,7 +1560,19 @@ function handleEnviar() {
         setTimeout(function() { goTo(1); }, 2200);
       });
     } else {
-      showFeedback('error', '\u26a0 ' + res.enviados + ' enviados, ' + res.erros + ' falha(s).');
+      // Busca itens para identificar quais hotéis falharam
+      veloCall('FETCH_ITENS', { disparoId: S.currentDisparoId }).then(function(r) {
+        var falhas = (r.itens || []).filter(function(it) { return it.statusEnvio === 'erro'; });
+        var nomes = falhas.map(function(it) {
+          var sc = it._sc || {};
+          return (sc.sigla || '?') + ' — ' + (sc.nome || it._id);
+        });
+        var msg = '\u26a0 ' + res.enviados + ' enviado(s), ' + res.erros + ' falha(s).';
+        if (nomes.length) msg += '\n\nHot\u00e9is com falha:\n' + nomes.join('\n');
+        showFeedback('error', msg);
+      }).catch(function() {
+        showFeedback('error', '\u26a0 ' + res.enviados + ' enviado(s), ' + res.erros + ' falha(s). Veja o Dashboard para detalhes.');
+      });
     }
   }).catch(function(err) {
     showFeedback('error', 'Erro ao enviar: ' + err.message);
@@ -1414,15 +1585,20 @@ function handleEnviar() {
 // NAVEGAÇÃO
 // ─────────────────────────────────────────────────────────────────────
 function goTo(n) {
-  ['scr1', 'scr2', 'scr3'].forEach(function(id, i) {
-    document.getElementById(id).classList.toggle('active', i + 1 === n);
-  });
-  ['stp1', 'stp2', 'stp3'].forEach(function(id, i) {
+  ['scr1', 'scr2', 'scr3', 'scrDash'].forEach(function(id, i) {
     var el = document.getElementById(id);
-    el.classList.remove('active', 'done');
-    if (i + 1 === n) el.classList.add('active');
-    else if (i + 1 < n) el.classList.add('done');
+    if (el) el.classList.toggle('active', (id === 'scrDash' ? 4 : i + 1) === n);
   });
+  var stepper = document.querySelector('.stepper');
+  if (stepper) stepper.style.display = (n === 4) ? 'none' : '';
+  if (n !== 4) {
+    ['stp1', 'stp2', 'stp3'].forEach(function(id, i) {
+      var el = document.getElementById(id);
+      el.classList.remove('active', 'done');
+      if (i + 1 === n) el.classList.add('active');
+      else if (i + 1 < n) el.classList.add('done');
+    });
+  }
   hideFeedback();
 }
 
@@ -1430,16 +1606,29 @@ function setPlatform(p, btn) {
   S.plataforma = p;
   document.querySelectorAll('.ptog .pb').forEach(function(b) { b.classList.remove('active'); });
   if (btn) btn.classList.add('active');
+  var isCom = p === 'comunicado';
+  // Mostra/esconde mês de ref e data de vencimento
+  document.getElementById('rowMesVenc').style.display = isCom ? 'none' : '';
+  // Ajusta label e placeholder do título
+  document.getElementById('labelTitulo').innerHTML = isCom
+    ? 'Assunto do email / T\u00edtulo do disparo <span class="tip" data-tip="Para comunicados: \u00e9 o assunto exato do email enviado. Para cobran\u00e7as: \u00e9 o nome interno — o assunto \u00e9 gerado automaticamente com sigla, plataforma e m\u00eas de refer\u00eancia.">i</span>'
+    : 'Assunto do email / T\u00edtulo do disparo <span class="tip" data-tip="Para cobran\u00e7as: \u00e9 o nome interno — o assunto \u00e9 gerado automaticamente com sigla, plataforma e m\u00eas de refer\u00eancia. Para comunicados: \u00e9 o assunto exato do email enviado.">i</span>';
+  document.getElementById('inputTitulo').placeholder = isCom ? 'Ex: Comunicado coevo \u2013 Junho 2026' : 'Cobran\u00e7a GAds \u2013 Jun/2026';
   updateTitle();
 }
 
 function updateTitle() {
+  if (S.plataforma === 'comunicado') return;
   var m = document.getElementById('inputMesRef').value;
   if (!m) return;
   var pts = m.split('-');
-  var ms = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-  var labels = { gads: 'GAds', mads: 'MAds', comunicado: 'Comunicado' };
-  document.getElementById('inputTitulo').value = 'Cobran\u00e7a ' + (labels[S.plataforma] || 'GAds') + ' \u2013 ' + ms[parseInt(pts[1]) - 1] + '/' + pts[0];
+  var ms = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  var mesAbrev = ms[parseInt(pts[1]) - 1] + '/' + pts[0].slice(2);
+  var labels = { gads: 'GADS', mads: 'MADS' };
+  var plat = labels[S.plataforma] || 'GADS';
+  var n = S.selectedIds ? S.selectedIds.length : 0;
+  var hotStr = n ? ' \u00b7 ' + n + (n === 1 ? ' hotel' : ' hot\u00e9is') : '';
+  document.getElementById('inputTitulo').value = plat + hotStr + ' \u00b7 ' + mesAbrev;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1463,9 +1652,39 @@ function showFeedback(type, text) {
   var el = document.getElementById('feedbackMsg');
   el.style.background = type === 'success' ? '#d1fae5' : '#fee2e2';
   el.style.color = type === 'success' ? '#065f46' : '#991b1b';
-  el.textContent = text;
+  el.innerHTML = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
   el.style.display = 'block';
 }
+
+function gerarAnalise() {
+  if (!DB.current || !DB.current.disparo) return;
+  var disparoId = DB.current.disparo.id;
+  var btn = document.getElementById('btnAnaliseIA');
+  var card = document.getElementById('aiCard');
+  var text = document.getElementById('aiCardText');
+  var status = document.getElementById('aiCardStatus');
+  card.style.display = 'block';
+  text.textContent = '';
+  status.textContent = 'Gerando\u2026';
+  if (btn) { btn.disabled = true; btn.textContent = '\u231b Gerando\u2026'; }
+  veloCall('ANALISE_DISPARO', { disparoId: disparoId }).then(function(res) {
+    if (res.ok && res.analise) {
+      text.textContent = res.analise;
+      status.textContent = fmtDateTime(new Date().toISOString());
+    } else {
+      text.style.color = '#c0392b';
+      text.textContent = res.error || 'N\u00e3o foi poss\u00edvel gerar a an\u00e1lise.';
+      status.textContent = 'Erro';
+    }
+  }).catch(function(err) {
+    text.style.color = '#c0392b';
+    text.textContent = 'Erro: ' + err.message;
+    status.textContent = 'Erro';
+  }).finally(function() {
+    if (btn) { btn.disabled = false; btn.innerHTML = '\u2728 An\u00e1lise IA'; }
+  });
+}
+
 
 function hideFeedback() {
   var el = document.getElementById('feedbackMsg');
@@ -1553,9 +1772,295 @@ function mockVeloResponse(type, payload, resolve, reject) {
     case 'DELETE_DISPARO':
       resolve({ ok: true });
       break;
+    case 'METRICAS_DISPARO':
+      var mockDisp = S.disparos.filter(function(x){ return x._id === payload.disparoId; })[0] || { _id:payload.disparoId, titulo:'Disparo', plataforma:'gads', status:'enviado', _createdDate:new Date().toISOString() };
+      resolve({ ok:true, disparo:{ id:mockDisp._id, titulo:mockDisp.titulo, plataforma:mockDisp.plataforma, status:mockDisp.status, _createdDate:mockDisp._createdDate, totalEnviados:mockDisp.totalEnviados||0 },
+        cms:{ totalItens:mockDisp._totalItens||8, enviados:mockDisp.totalEnviados||6, erros:2, pendentes:0 },
+        resumo:{ totalHoteis:6, entregues:6, aberturas:4, cliques:2, bounces:1, bloqueados:1, taxaEntrega:100, taxaAbertura:67, taxaClique:33 },
+        porHotel:[
+          { sigla:'CFO', nome:'Comfort Fortaleza', entregue:true, aberto:true, clicado:true, bounce:false, bloqueado:false, ultimoEvento:'24/06 14:02', emails:['financeiro@hotel.com','gerente@hotel.com'], eventosPorEmail:{ 'financeiro@hotel.com':{ entregue:'24/06 13:21', aberto:'24/06 13:45', clicado:'24/06 14:02', bounce:null, bloqueado:null }, 'gerente@hotel.com':{ entregue:'24/06 13:21', aberto:null, clicado:null, bounce:null, bloqueado:null } } },
+          { sigla:'TBEL', nome:'Transamérica Belém', entregue:true, aberto:true, clicado:false, bounce:false, bloqueado:true, ultimoEvento:'24/06 13:20', emails:['ger@tbel.com','fin@tbel.com'], eventosPorEmail:{ 'ger@tbel.com':{ entregue:'24/06 12:34', aberto:'24/06 13:20', clicado:null, bounce:null, bloqueado:null }, 'fin@tbel.com':{ entregue:null, aberto:null, clicado:null, bounce:null, bloqueado:'24/06 12:33' } } },
+          { sigla:'CHGO', nome:'Comfort Goiânia', entregue:true, aberto:false, clicado:false, bounce:false, bloqueado:false, ultimoEvento:'24/06 12:33', emails:['fin@chgo.com'], eventosPorEmail:{ 'fin@chgo.com':{ entregue:'24/06 12:33', aberto:null, clicado:null, bounce:null, bloqueado:null } } },
+          { sigla:'SGRU', nome:'Sleep Inn Guarulhos', entregue:true, aberto:true, clicado:true, bounce:true, bloqueado:false, ultimoEvento:'24/06 13:41', emails:['fin@sgru.com','copia@sgru.br'], eventosPorEmail:{ 'fin@sgru.com':{ entregue:'24/06 12:34', aberto:'24/06 13:30', clicado:'24/06 13:41', bounce:null, bloqueado:null }, 'copia@sgru.br':{ entregue:null, aberto:null, clicado:null, bounce:'24/06 12:34', bloqueado:null } } },
+          { sigla:'CHSN', nome:'Comfort Natal', entregue:false, aberto:false, clicado:false, bounce:true, bloqueado:false, ultimoEvento:'24/06 12:11', emails:['invalido@test'], eventosPorEmail:{ 'invalido@test':{ entregue:null, aberto:null, clicado:null, bounce:'24/06 12:11', bloqueado:null } } },
+          { sigla:'TLI', nome:'Transamerica Lagoa Ingleses', entregue:true, aberto:true, clicado:false, bounce:false, bloqueado:false, ultimoEvento:'24/06 13:22', emails:['fin@tli.com'], eventosPorEmail:{ 'fin@tli.com':{ entregue:'24/06 12:35', aberto:'24/06 13:22', clicado:null, bounce:null, bloqueado:null } } }
+        ]
+      });
+      break;
     default:
       reject(new Error('Mock: tipo desconhecido ' + type));
   }
+}
+
+function fmtEvento(v) {
+  if (!v) return '\u2014';
+  if (/^\d{2}\/\d{2}/.test(String(v))) return v; // já formatado (mock)
+  try {
+    var d = new Date(v);
+    return d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' })
+      + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  } catch(e) { return String(v); }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// DASHBOARD DE ENVIOS
+// ─────────────────────────────────────────────────────────────────────
+var DB = { filter: 'todos', current: null, hoteis: [], search: '' };
+
+function abrirDashboard(disparoId) {
+  var sel = document.getElementById('selDispDash');
+  var lista = S.disparos.filter(function(d) { return d.status && d.status !== 'rascunho'; });
+  sel.innerHTML = '<option value="">Selecione um disparo…</option>' + lista.map(function(d) {
+    var platL = { gads:'GAds', mads:'MAds', comunicado:'Comunicado' }[d.plataforma] || d.plataforma;
+    return '<option value="' + d._id + '">' + esc(d.titulo) + ' \u00b7 ' + platL + ' \u00b7 ' + fmtDate(d._createdDate) + '</option>';
+  }).join('');
+  sel.onchange = function() {
+    if (this.value) { carregarDash(this.value); }
+    else { document.getElementById('dashContent').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Selecione um disparo acima.</div>'; }
+  };
+  if (disparoId) { sel.value = disparoId; carregarDash(disparoId); }
+  else { document.getElementById('dashContent').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Selecione um disparo acima.</div>'; }
+  goTo(4);
+}
+
+function atualizarDash() {
+  var sel = document.getElementById('selDispDash');
+  if (sel && sel.value) carregarDash(sel.value);
+}
+
+function carregarDash(disparoId) {
+  document.getElementById('dashContent').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><div class="spinner" style="margin:0 auto 12px"></div>Consultando Brevo…</div>';
+  veloCall('METRICAS_DISPARO', { disparoId: disparoId }).then(function(res) {
+    if (!res.ok) throw new Error(res.error || 'Sem dados');
+    DB.current = res; DB.filter = 'todos';
+    renderDash();
+  }).catch(function(err) {
+    document.getElementById('dashContent').innerHTML = '<div style="text-align:center;padding:40px;color:#c0392b">Erro: ' + esc(err.message) + '</div>';
+  });
+}
+
+function renderDash() {
+  var m = DB.current;
+  if (!m) return;
+
+  // Bug fix: disparo sem nenhum envio → não exibe métricas fantasma
+  if (m.semEnvios) {
+    document.getElementById('dashContent').innerHTML =
+      '<div style="text-align:center;padding:40px;color:var(--muted)">'
+      + '<div style="font-size:32px;margin-bottom:12px">\uD83D\uDCED</div>'
+      + '<div style="font-weight:600;margin-bottom:6px">Nenhum email foi enviado neste disparo</div>'
+      + '<div style="font-size:13px">Todos os itens est\u00e3o com erro ou pendentes \u2014 sem dados de entrega no Brevo.</div>'
+      + '</div>';
+    var btnAI = document.getElementById('btnAnaliseIA');
+    if (btnAI) btnAI.style.display = 'none';
+    var aiCard = document.getElementById('aiCard');
+    if (aiCard) aiCard.style.display = 'none';
+    return;
+  }
+
+  // Detecção defensiva: CMS enviou emails mas Brevo não encontrou nenhum hotel
+  // Cobre o caso onde o backend ainda não retorna semDados (versão antiga em produção)
+  if (!m.semEnvios && !m.semDados && m.cms && m.cms.enviados > 0 && m.resumo && m.resumo.totalHoteis === 0) {
+    m.semDados = true;
+  }
+
+  if (m.semDados) {
+    document.getElementById('dashContent').innerHTML =
+      '<div style="text-align:center;padding:40px;color:var(--muted)">'
+      + '<div style="font-size:32px;margin-bottom:12px">\uD83D\uDD0D</div>'
+      + '<div style="font-weight:600;margin-bottom:6px">Sem dados de rastreamento para este disparo</div>'
+      + '<div style="font-size:13px">Nenhum evento foi encontrado pela tag \u00fanica do disparo no Brevo.<br>'
+      + 'Pode ser um disparo antigo (anterior ao uso de tags) ou um comunicado sem rastreamento configurado.</div>'
+      + '</div>';
+    var btnAI2 = document.getElementById('btnAnaliseIA');
+    if (btnAI2) btnAI2.style.display = 'none';
+    var aiCard2 = document.getElementById('aiCard');
+    if (aiCard2) aiCard2.style.display = 'none';
+    return;
+  }
+
+  var r = m.resumo, c = m.cms, dp = m.disparo;
+  var platLabels = { gads:'Google Ads', mads:'Meta Ads', comunicado:'Comunicado' };
+  var platCls    = { gads:'p-gads', mads:'p-mads', comunicado:'p-comm' };
+  var stMap = { enviado:{l:'\u2713 Enviado',c:'p-sent'}, parcial:{l:'\u26a0 Parcial',c:'p-part'}, erro:{l:'\u2717 Erro',c:'p-err'}, rascunho:{l:'Rascunho',c:'p-draft'} };
+  var st = stMap[dp.status] || { l:dp.status, c:'p-pend' };
+  // Usa o maior entre CMS enviados e hotéis rastreados pelo Brevo para evitar percentuais absurdos
+  var envBase = Math.max(c.enviados, r.totalHoteis, 1);
+  var baseLabel = r.totalHoteis > c.enviados ? 'dos rastreados' : 'dos enviados';
+
+  // Detecta inconsistência severa: Brevo encontrou muito mais hotéis do que o CMS tem
+  var inconsistente = r.totalHoteis > c.totalItens * 2 && c.totalItens > 0;
+
+  var txEntrega  = envBase ? Math.round(100 * r.entregues  / envBase) : 0;
+  var txAbertura = envBase ? Math.round(100 * r.aberturas  / envBase) : 0;
+  var txClique   = envBase ? Math.round(100 * r.cliques    / envBase) : 0;
+
+  var kpis = [
+    {n:c.enviados,   l:'Enviados',  r:c.totalItens+' no total',              c:'var(--blue)'},
+    {n:r.entregues,  l:'Entregues', r:txEntrega+'% '+baseLabel,              c:'#0a7a5c'},
+    {n:r.aberturas,  l:'Aberturas', r:txAbertura+'% '+baseLabel,             c:'var(--teal)'},
+    {n:r.cliques,    l:'Cliques',   r:txClique+'% '+baseLabel,               c:'var(--purple)'},
+    {n:r.bounces,    l:'Bounces',   r:'endere\u00e7os inv\u00e1lidos',       c:'var(--yellow)'},
+    {n:r.bloqueados, l:'Bloqueados',r:'pelo provedor',                        c:'#f25252'}
+  ].map(function(k) {
+    return '<div class="db-kpi" style="--c:'+k.c+'"><div class="n">'+k.n+'</div><div class="l">'+k.l+'</div><div class="r">'+k.r+'</div></div>';
+  }).join('');
+
+  function fl(cap,v,base,color) { var w=base?Math.max(5,Math.round(v/base*100)):0; return '<div class="db-fl"><div class="cap">'+cap+'</div><div class="track"><div class="fill" style="width:'+Math.min(w,100)+'%;background:'+color+'">'+v+'</div></div></div>'; }
+  var funnel = fl('Enviado',c.enviados,envBase,'var(--blue)') + fl('Entregue',r.entregues,envBase,'#0a7a5c') + fl('Aberto',r.aberturas,envBase,'var(--teal)') + fl('Clicado',r.cliques,envBase,'var(--purple)');
+
+  var avisoInconsistencia = inconsistente
+    ? '<div style="background:#fff8e1;border:1px solid #f2b705;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#92600a">'
+      + '\u26a0 O Brevo identificou <b>'+r.totalHoteis+' hot\u00e9is</b> nos eventos, mas o CMS tem apenas <b>'+c.totalItens+'</b> neste disparo. '
+      + 'Os dados do Brevo podem estar misturando eventos de outros disparos (fallback por assunto).'
+      + '</div>'
+    : '';
+
+  document.getElementById('dashContent').innerHTML =
+    '<div class="meta" style="margin:0 0 16px">'
+    + '<span style="font-weight:700;font-size:15px">'+esc(dp.titulo)+'</span>&nbsp;'
+    + '<span class="pill '+(platCls[dp.plataforma]||'p-gads')+'">'+(platLabels[dp.plataforma]||dp.plataforma)+'</span>&nbsp;'
+    + '<span class="pill '+st.c+'">'+st.l+'</span>'
+    + '<span style="color:var(--muted);font-size:12px;font-weight:600;margin-left:auto">'+fmtDate(dp._createdDate)+'</span></div>'
+    + avisoInconsistencia
+    + '<div class="db-kpis">'+kpis+'</div>'
+    + '<div class="card-inner" style="padding:14px 18px;margin-bottom:14px"><div style="font-family:\'Playfair Display\',serif;font-size:15px;font-weight:700;margin-bottom:12px">Funil de engajamento</div><div class="db-funil">'+funnel+'</div></div>'
+    + '<div class="db-recon">'
+    +   '<b>Sistema:</b> '+c.enviados+' enviados <span class="db-dot"></span> '+c.erros+' com erro'
+    +   '<span class="db-dot"></span>'
+    +   '<b>Brevo:</b> '+r.entregues+' entregues <span class="db-dot"></span> '+r.aberturas+' aberturas <span class="db-dot"></span> '+r.cliques+' cliques'
+    +   '<span style="margin-left:auto;font-size:10.5px;color:var(--light);font-weight:600" title="O Brevo conta por endere\u00e7o de email; o Sistema conta por hotel. Hot\u00e9is com m\u00faltiplos contatos podem gerar mais eventos Brevo do que itens no Sistema.">ℹ por que diferem?</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;margin:14px 0 10px;flex-wrap:wrap">'
+    +   '<div class="db-chips" id="dbChips" style="margin:0;flex:1"></div>'
+    +   '<div style="position:relative;flex:0 0 auto">'
+    +     '<input type="text" id="dbEmailSearch" placeholder="\uD83D\uDD0D Buscar por email..." oninput="onDbSearch(this.value)" style="border:1.5px solid #e2e4f0;border-radius:10px;padding:6px 11px;font-size:12px;font-weight:600;font-family:inherit;color:var(--dark);width:220px">'
+    +   '</div>'
+    + '</div>'
+    + '<p class="count" id="dbCount"></p>'
+    + '<div style="overflow-x:auto"><table><thead><tr><th>Sigla</th><th>Hotel</th><th>Status no Brevo</th><th>\u00daltimo evento</th></tr></thead><tbody id="dbBody"></tbody></table></div>'
+    + '<div style="margin-top:14px;text-align:right"><span style="font-size:10px;color:var(--muted);font-family:monospace;letter-spacing:.03em">id: '+esc(dp.id)+'</span></div>';
+
+  DB.search = '';
+  renderDbChips(); renderDbTable();
+
+  // Exibe botão de IA e reseta o card de análise
+  var btnAI = document.getElementById('btnAnaliseIA');
+  if (btnAI) btnAI.style.display = 'inline-flex';
+  var aiCard = document.getElementById('aiCard');
+  if (aiCard) aiCard.style.display = 'none';
+  var aiText = document.getElementById('aiCardText');
+  if (aiText) aiText.textContent = '';
+  var aiStatus = document.getElementById('aiCardStatus');
+  if (aiStatus) aiStatus.textContent = '';
+}
+
+function dbMatchF(h) {
+  // Filtro por chip
+  var passChip = true;
+  switch(DB.filter) {
+    case 'abriram':    passChip = h.aberto; break;
+    case 'naoabriram': passChip = h.entregue && !h.aberto; break;
+    case 'clicaram':   passChip = h.clicado; break;
+    case 'problema':   passChip = h.bounce || h.bloqueado || !h.entregue; break;
+  }
+  if (!passChip) return false;
+  // Filtro por email
+  if (DB.search) {
+    var q = DB.search.toLowerCase();
+    var emails = h.emails || [];
+    return emails.some(function(e) { return e.toLowerCase().indexOf(q) !== -1; });
+  }
+  return true;
+}
+
+function onDbSearch(v) {
+  DB.search = (v || '').trim();
+  renderDbChips(); renderDbTable();
+}
+
+function renderDbChips() {
+  var hs = DB.current.porHotel || [];
+  // Aplica filtro de busca para contagens dos chips
+  var base = DB.search
+    ? hs.filter(function(h) { var q=DB.search.toLowerCase(); return (h.emails||[]).some(function(e){return e.toLowerCase().indexOf(q)!==-1;}); })
+    : hs;
+  var defs = [
+    {k:'todos',     l:'Todos',            n:base.length},
+    {k:'abriram',   l:'Abriram',          n:base.filter(function(h){return h.aberto;}).length},
+    {k:'naoabriram',l:'N\u00e3o abriram', n:base.filter(function(h){return h.entregue&&!h.aberto;}).length},
+    {k:'clicaram',  l:'Clicaram',         n:base.filter(function(h){return h.clicado;}).length},
+    {k:'problema',  l:'Com problema',     n:base.filter(function(h){return h.bounce||h.bloqueado||!h.entregue;}).length}
+  ];
+  document.getElementById('dbChips').innerHTML = defs.map(function(d) {
+    return '<span class="db-chip '+(DB.filter===d.k?'on':'')+'" data-k="'+d.k+'">'+d.l+'<span class="c">'+d.n+'</span></span>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#dbChips .db-chip'), function(el) {
+    el.onclick = function() { DB.filter = this.getAttribute('data-k'); renderDbChips(); renderDbTable(); };
+  });
+}
+
+function renderDbTable() {
+  var hs = (DB.current.porHotel || []).filter(dbMatchF);
+  DB.hoteis = hs;
+  var body = document.getElementById('dbBody');
+  document.getElementById('dbCount').textContent = hs.length + ' hot' + (hs.length !== 1 ? '\u00e9is' : 'el');
+  if (!hs.length) { body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#9aa0b0;padding:26px">Nenhum hotel neste filtro.</td></tr>'; return; }
+  body.innerHTML = hs.map(function(h, i) {
+    var bs = [];
+    if (h.entregue)  bs.push(dbBdg('b-ok',    i,'entregue',   'Entregue'));
+    else             bs.push(dbBdg('b-none',   i,'naoEntregue','N\u00e3o entregue'));
+    if (h.aberto)    bs.push(dbBdg('b-open',   i,'aberto',     'Aberto'));
+    if (h.clicado)   bs.push(dbBdg('b-click',  i,'clicado',    'Clicado'));
+    if (h.bounce)    bs.push(dbBdg('b-bounce', i,'bounce',     'Bounce'));
+    if (h.bloqueado) bs.push(dbBdg('b-block',  i,'bloqueado',  'Bloqueado'));
+    return '<tr><td><span class="sig ' + siglaColor(h.sigla) + '">' + esc(h.sigla) + '</span></td>'
+      + '<td style="font-weight:600">' + esc(h.nome) + '</td>'
+      + '<td><div class="badges">' + bs.join('') + '</div></td>'
+      + '<td class="last">' + fmtEvento(h.ultimoEvento) + '</td></tr>';
+  }).join('');
+}
+
+function dbBdg(cls, hi, tipo, label) {
+  return '<span class="bdg ' + cls + '" data-hi="' + hi + '" data-tipo="' + tipo + '" onmouseenter="onDbBdg(this,event)" onmouseleave="hideTT()">' + label + '</span>';
+}
+
+// ── Tooltip ──────────────────────────────────────────────────────────
+var _ttEl = null;
+function getTT() { return _ttEl || (_ttEl = document.getElementById('ttBox')); }
+function showTT(html, ev) {
+  var b = getTT(); if (!b) return;
+  b.innerHTML = html; b.style.display = 'block';
+  var x = ev.clientX + 14, y = ev.clientY - 10;
+  if (x + 330 > window.innerWidth) x = ev.clientX - 344;
+  if (y + 170 > window.innerHeight) y = ev.clientY - 180;
+  b.style.left = x + 'px'; b.style.top = y + 'px';
+}
+function hideTT() { var b = getTT(); if (b) b.style.display = 'none'; }
+
+function onDbBdg(el, ev) {
+  var hi = parseInt(el.getAttribute('data-hi'));
+  var tipo = el.getAttribute('data-tipo');
+  var h = DB.hoteis[hi];
+  if (!h) return;
+  showTT(buildTT(h, tipo), ev);
+}
+
+function buildTT(h, tipo) {
+  var tipoL = { entregue:'Entregue', naoEntregue:'N\u00e3o entregue', aberto:'Aberto', clicado:'Clicado', bounce:'Bounce', bloqueado:'Bloqueado' }[tipo] || tipo;
+  var hdr = '<div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9ca3af;margin-bottom:8px;border-bottom:1px solid #2d2d2d;padding-bottom:6px">'
+    + esc(tipoL) + ' \u2014 ' + esc(h.nome) + '</div>';
+  var emails = h.emails || [];
+  if (!emails.length) return hdr + '<span style="color:#6b7280;font-size:11px">Sem registros de email</span>';
+  var rows = emails.map(function(email) {
+    var eData = h.eventosPorEmail && h.eventosPorEmail[email];
+    var val = eData && eData[tipo];
+    return '<div style="display:flex;justify-content:space-between;gap:18px;margin-bottom:3px">'
+      + '<span style="color:#d1d5db;font-size:11px">' + esc(email) + '</span>'
+      + '<span style="color:' + (val ? '#4ade80' : '#4b5563') + ';white-space:nowrap;font-size:11px;font-weight:700">' + (val ? fmtEvento(val) : '\u2014') + '</span>'
+      + '</div>';
+  }).join('');
+  return hdr + rows;
 }
 </script>
 </body>
