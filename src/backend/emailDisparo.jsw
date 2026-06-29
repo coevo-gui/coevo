@@ -363,7 +363,6 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     const headers = { 'Content-Type': 'application/json', 'api-key': brevoKey };
     const disparo = await wixData.get('disparos', disparoId, { suppressAuth: true });
     if (!disparo) return { ok: false, error: 'Disparo não encontrado: ' + disparoId };
-    // Tags distintas por tipo: cobranças usam 'cobranca' / 'cobranca-{id}'; comunicados usam 'comunicado' / 'comunicado-{id}'
     const tagBase = disparo.plataforma === 'comunicado' ? 'comunicado' : 'cobranca';
     const tagDisparo = tagBase + '-' + disparoId;
     const itensResult = await wixData.query('itensDisparo').eq('disparoRef', disparoId).limit(1000).find({ suppressAuth: true });
@@ -377,14 +376,12 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
     scArr.forEach(sc => { if (sc && sc._id) scMap[sc._id] = sc; });
     let enviados = 0, erros = 0, pulados = 0;
     for (const item of itens) {
-      // PROTEÇÃO CONTRA REENVIO
       if (item.statusEnvio === 'enviado') {
         console.warn('[emailDisparo] item já enviado, pulando reenvio:', item._id);
         pulados++;
         enviados++;
         continue;
       }
-      // PROTEÇÃO CONTRA VALOR ZERADO
       if (disparo.plataforma !== 'comunicado' && (!item.valorInvestimento || item.valorInvestimento <= 0)) {
         console.warn('[emailDisparo] valorInvestimento ausente/zerado, bloqueando envio:', item._id);
         erros++;
@@ -395,7 +392,6 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
       const scId = itemScMap[item._id] || item.subclienteRef;
       const sc = scMap[scId];
       if (!sc) {
-        console.warn('[emailDisparo] subcliente não encontrado. scId:', scId);
         erros++;
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
         if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
@@ -410,7 +406,6 @@ export async function enviarDisparos(disparoId, itemScMap = {}, destinatarios = 
         ? disparo.replyTo.trim()
         : 'midia@coevo.co';
       if (!toEmails.length) {
-        console.warn('[emailDisparo] nenhum destinatário válido para:', scId);
         erros++;
         const ei = await wixData.get('itensDisparo', item._id, { suppressAuth: true }).catch(() => null);
         if (ei) await wixData.update('itensDisparo', { ...ei, statusEnvio: 'erro' }, { suppressAuth: true });
@@ -460,14 +455,16 @@ function toYMD(d) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
 }
 
-async function fetchBrevoEvents(headers, { tag, startDate, endDate }) {
+async function fetchBrevoEvents(headers, { startDate, endDate }) {
+  // NOTA: O endpoint /v3/smtp/statistics/events do Brevo NAO suporta filtro por tags
+  // na query string (retorna vazio). Buscamos todos os eventos do período e filtramos
+  // em JavaScript pelo campo `e.tag` (string separada por vírgulas no response).
   let all = [], offset = 0;
   const limit = 5000;
   for (let i = 0; i < 6; i++) {
     let url = `${BREVO_EVENTS_URL}?limit=${limit}&offset=${offset}&sort=desc`;
     if (startDate) url += `&startDate=${startDate}`;
     if (endDate)   url += `&endDate=${endDate}`;
-    if (tag)       url += `&tags=${encodeURIComponent(JSON.stringify([tag]))}`;
     const res = await fetch(url, { method: 'GET', headers });
     if (!res.ok) { const t = await res.text(); console.error('[emailDisparo] Brevo events', res.status, t); break; }
     const data = await res.json();
@@ -515,7 +512,6 @@ export async function obterMetricasDisparo(disparoId) {
     const cmsErros     = itens.filter(i => i.statusEnvio === 'erro').length;
     const cmsPendentes = itens.filter(i => i.statusEnvio !== 'enviado' && i.statusEnvio !== 'erro').length;
 
-    // Sem envios: não busca o Brevo
     if (cmsEnviados === 0) {
       return {
         ok: true, matchedBy: 'none', totalEventos: 0, semEnvios: true,
@@ -534,15 +530,21 @@ export async function obterMetricasDisparo(disparoId) {
         if (e && e.includes('@')) String(e).split(/[,\s]+/).forEach(x => { if (x.includes('@')) emailMap[x.trim().toLowerCase()] = { sigla: sc.sigla, nome: sc.nome }; });
       });
     });
+
     const created = disparo._createdDate ? new Date(disparo._createdDate) : new Date();
     const startDate = toYMD(created);
     const endDate = toYMD(new Date());
-    // Tag única por disparo: cobranca-{id} ou comunicado-{id}
-    const tagPrefix = disparo.plataforma === 'comunicado' ? 'comunicado' : 'cobranca';
-    const tag = tagPrefix + '-' + disparoId;
-    const eventos = await fetchBrevoEvents(headers, { tag, startDate, endDate });
 
-    // Sem fallback por assunto: se a tag não encontrou eventos, retorna semDados
+    // Busca todos os eventos do período (sem filtro de tag — a API do Brevo não suporta)
+    const tagDisparo = (disparo.plataforma === 'comunicado' ? 'comunicado' : 'cobranca') + '-' + disparoId;
+    const todosEventos = await fetchBrevoEvents(headers, { startDate, endDate });
+
+    // Filtra em JavaScript pelo campo `e.tag` (string separada por vírgulas)
+    const eventos = todosEventos.filter(e => {
+      if (!e.tag) return false;
+      return e.tag.split(',').map(t => t.trim()).includes(tagDisparo);
+    });
+
     if (!eventos.length) {
       return {
         ok: true, matchedBy: 'tag', totalEventos: 0, semDados: true,
@@ -687,8 +689,8 @@ export async function gerarAnaliseDisparo(disparoId) {
 Analise os dados do disparo e escreva UM parágrafo em português do Brasil.
 Máximo 4 linhas. Sem bullets, sem cabeçalhos, sem formatação. Texto corrido, direto e objetivo.
 Inclua: principais números, comparativo com histórico quando disponível, alertas se houver.
-Se houver problemas (bounces, bloqueios), cite os hotéis afetados e diga o que fazer em linguagem simples e operacional — sem termos técnicos de email (sem SPF, DKIM, scanner, proxy, pixel).
-Aberturas sem entrega registrada provavelmente não são humanas — mencione como "aberturas não confirmadas" se relevante, sem explicar o motivo técnico.
+Se houver problemas (bounces, bloqueios), cite os hotéis afetados e diga o que fazer em linguagem simples e operacional — sem termos técnicos de email.
+Aberturas sem entrega registrada provavelmente não são humanas — mencione como "aberturas não confirmadas" se relevante.
 Tom: direto e informativo, como se estivesse falando com um colega da equipe.`;
 
     const userContent = contextoAtual + contextoHistorico + '\n\nGere o parágrafo de análise:';
