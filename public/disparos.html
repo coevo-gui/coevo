@@ -443,8 +443,9 @@ body{font-family:'Raleway',sans-serif;padding:20px 16px 40px}
           <input type="email" id="inputCCGlobal" placeholder="acompanhamento@exemplo.com">
         </div>
         <div class="fg">
-          <label>Responder para <span class="tip" data-tip="Endereço para onde as respostas dos hotéis serão direcionadas. Padrão: midia@coevo.co">i</span></label>
-          <input type="email" id="inputReplyTo" value="midia@coevo.co" placeholder="midia@coevo.co">
+          <label>Responder para <span class="tip" data-tip="Endereço para onde as respostas dos hotéis serão direcionadas. Obrigatório — varia por cliente (ex: midia@coevo.co, ahi@coevo.co).">i</span></label>
+          <input type="email" id="inputReplyTo" placeholder="" required oninput="var e=document.getElementById('erroReplyTo'); if(e) e.style.display='none';">
+          <div id="erroReplyTo" style="display:none;font-size:11px;color:#c0392b;font-weight:600;margin-top:2px">Escolha um email de "Responder para" antes de continuar.</div>
         </div>
       </div>
 
@@ -591,7 +592,7 @@ var S = {
   plataforma: 'gads',
   destinatarios: { financeiro: true, gerenteGeral: true, focalMkt: true, copia: true },
   ccGlobal: '',
-  replyTo: 'midia@coevo.co',
+  replyTo: '',
   sortCol: '_updatedDate',
   sortDir: 'desc'
 };
@@ -1265,9 +1266,11 @@ function iniciarNovoDisparo() {
   S.selectedIds = [];
   S.plataforma = 'gads';
   S.ccGlobal = '';
-  S.replyTo = 'midia@coevo.co';
+  S.replyTo = '';
   document.getElementById('inputCCGlobal').value = '';
-  document.getElementById('inputReplyTo').value = 'midia@coevo.co';
+  document.getElementById('inputReplyTo').value = '';
+  var erroRT0 = document.getElementById('erroReplyTo');
+  if (erroRT0) erroRT0.style.display = 'none';
   document.querySelectorAll('.ptog .pb').forEach(function(b, i) { b.classList.toggle('active', i === 0); });
   renderSCSelector(S.subclientes);
   renderClienteDropdown();
@@ -1287,6 +1290,17 @@ function handleContinuar() {
   }
   document.getElementById('erroSC').style.display = 'none';
 
+  var replyToInput = document.getElementById('inputReplyTo');
+  var replyToVal = (replyToInput.value || '').trim();
+  var erroRT = document.getElementById('erroReplyTo');
+  if (!replyToVal) {
+    if (erroRT) erroRT.style.display = 'block';
+    replyToInput.focus();
+    if (typeof replyToInput.reportValidity === 'function') replyToInput.reportValidity();
+    return;
+  }
+  if (erroRT) erroRT.style.display = 'none';
+
   // Captura destinatários da tela 2
   S.destinatarios = {
     financeiro:   document.getElementById('destFinanceiro').checked,
@@ -1295,7 +1309,7 @@ function handleContinuar() {
     copia:        document.getElementById('destCopia').checked
   };
   S.ccGlobal = (document.getElementById('inputCCGlobal').value || '').trim();
-  S.replyTo  = (document.getElementById('inputReplyTo').value  || '').trim() || 'midia@coevo.co';
+  S.replyTo  = replyToVal;
   S.nomeRemetente = (document.getElementById('inputNomeRemetente').value || '').trim() || 'M\u00eddia coevo';
 
   // Se já criou disparo nesta sessão, não cria outro — evita rascunhos duplicados
@@ -1342,7 +1356,7 @@ function verDetalhe(disparoId) {
     // Sincroniza estado de plataforma com o disparo existente
     S.plataforma = res.disparo.plataforma || 'gads';
     S.ccGlobal = res.disparo.ccGlobal || '';
-    S.replyTo  = res.disparo.replyTo  || 'midia@coevo.co';
+    S.replyTo  = res.disparo.replyTo  || '';
     S.nomeRemetente = res.disparo.nomeRemetente || 'M\u00eddia coevo';
     // Preenche editor rich text com o textoCorpo do disparo existente
     setCorpoHTML(res.disparo.textoCorpo || '');
