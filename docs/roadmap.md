@@ -19,15 +19,15 @@ GitHub coevo-gui/coevo (main) ──► Wix Git Integration ──► coevo.co (
 Wix Editor (design/IDs) ◄──sync──► wix.config.json
 public/disparos.html ──upload manual──► Wix Media Manager ──► HtmlComponent #htmlDisparos
 
-Membro Wix ─► acessoUsuario (nivel) ─► filtros por página (masterPage + cada página Velo)
+Membro Wix ──► acessoUsuario (nivel) ──► filtros por página (masterPage + cada página Velo)
                                         │
-     ┌──────────────┬─────────────┬─────┴────────┬──────────────┬───────────────┐
-     ▼              ▼             ▼              ▼              ▼               ▼
-  Núcleo do    Smart Briefing   Pauta        Disparos de    Painel em Dia   Insights BQ
-  portal       (embed + IA)    (ClickUp)     Cobrança       (Brevo)         (protótipo)
-  (CMS)             │             │          (embed+Brevo)      │                │
-                Anthropic      ClickUp API   Brevo API       Brevo API      BigQuery coevo-co
-                ClickUp                      Anthropic                      (gold_* por Sigla)
+     ┌───────────────┬───────────────┬──┴───────┬──────────────┬───────────────┬──────────────┐
+     ▼               ▼               ▼          ▼              ▼               ▼              ▼
+  Núcleo do     Smart Briefing     Pauta      Disparos de    Painel em Dia   Insights BQ   MIGRAÇÃO
+  portal        (embed + IA)      (ClickUp)   Cobrança       (Brevo)        (protótipo)    PARA
+  (CMS)             │               │        (embed+Brevo)      │                │          REACT+SB
+                Anthropic         ClickUp API  Brevo API      Brevo API     BigQuery       (POC)
+                ClickUp                        Anthropic      coevo-co     (gold_*)
                 Brevo
 ```
 Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `acessoUsuario`, `disparos`, `itensDisparo`, `versoes`, `briefingLogs`. Chave universal: `sigla`.
@@ -39,6 +39,7 @@ Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `
 - **Chave universal: `Sigla`** (portal, ClickUp, BigQuery, Looker).
 - **3 níveis de acesso** (`coevo_admin`, `cliente_rede`, `cliente_unidade`) resolvidos por página via `acessoUsuario`; Disparos é exclusivo de admin.
 - **Painel em Dia operado via conversa** (Gui fornece conteúdo → Claude dispara via Brevo MCP → registra em `versoes`). Só o Gui inicia disparos. Formato de versão: `vX.Y · mês/ano`.
+- **🔄 DECISÃO DE MIGRAÇÃO (09/07/2026)**: arquitetura Wix chegou ao pico de complexidade com ROI decrescente (PUT do Data API, deploy manual, RLS impossível, bridge HtmlComponent exótica, sem versionamento real). **Migração planejada para React + Supabase + Vercel** (`painel.coevo.co`), com POC do módulo Disparos (3–4 semanas, Fase 0–5, shadow run no fechamento do mês). Ordem: Disparos → Smart Briefing → Núcleo → Painel em Dia → Insights BigQuery. Site institucional `coevo.co` continua no Wix «por enquanto» (futuro TBD). Pipeline `coevo-co` (BigQuery) **não é tocado no POC** — integração de Supabase como fonte de verdade acontece após consolidação do Núcleo.
 
 ### Segurança de dados (pós-incidente 01/07/2026)
 - **🚨 Wix Data API: NUNCA PUT em item existente.** PUT substitui o item inteiro; campos não enviados viram null. O incidente apagou `sigla`, `nome`, `clienteRef` e emails de 67 subclientes AHI (recuperado de backups). Padrão obrigatório: fetch completo → spread → override do campo → gravar. Via API externa, `POST /wix-data/v2/bulk/items/patch` com `fieldModifications`.
@@ -70,7 +71,7 @@ Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `
 | Pauta de Tarefas | ✅ Produção, estável | ClickUp, janela −10/+15 dias, `visível cliente` |
 | Painel em Dia | ✅ v1.0 disparada (jun/2026) | Backend Brevo pronto; auto-inscrição no cadastro; **falta a Etapa 2 (frontend)** |
 | Disparos de Cobrança | ✅ Produção | Sem paginação (revertida); replyTo obrigatório; métricas + análise IA no ar |
-| Insights BigQuery | 🔬 Protótipo validado (02/07) | Nada commitado; próximo grande passo |
+| Insights BigQuery | 🔍 Protótipo validado (02/07) | Nada commitado; próximo grande passo |
 
 ## 6. Visão original (27/03) × implementado
 
@@ -78,45 +79,48 @@ Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `
 |---|---|
 | Dashboard de hotéis com navegação interna | ✅ Início + Ficha + lightbox de dashboards |
 | Hierarquia cliente > subcliente + permissões | ✅ 3 níveis via `acessoUsuario` |
-| Página de administração (CRUD) | ◑ Edição de subclientes no portal; demais cadastros direto no CMS |
-| Gestão financeira / cobranças | ◑ Disparos de Cobrança via Brevo (boleto/PIX manuais); integração Conta Azul não iniciada |
-| Gestão de relatórios + notificação | ◑ Coberto parcialmente por Documentos + dashboards; automação mensal não iniciada |
-| Documentação/FAQ (wiki) | ◑ Wiki vive no ClickUp e alimenta o Coevito; FAQ no portal não iniciado |
+| Página de administração (CRUD) | ⚠️ Edição de subclientes no portal; demais cadastros direto no CMS |
+| Gestão financeira / cobranças | ⚠️ Disparos de Cobrança via Brevo (boleto/PIX manuais); integração Conta Azul não iniciada |
+| Gestão de relatórios + notificação | ⚠️ Coberto parcialmente por Documentos + dashboards; automação mensal não iniciada |
+| Documentação/FAQ (wiki) | ⚠️ Wiki vive no ClickUp e alimenta o Coevito; FAQ no portal não iniciado |
 | Gerenciador de arquivos por categoria | ✅ Documentos + `categoriaDocumento` |
 | Entrega de jobs | ✅ Smart Briefing (entrada) + Pauta (acompanhamento) |
 | Integração ClickUp | ✅ Pauta + criação de tasks |
-| 3 versões de layout por tipo de cliente | ◑ Resolvido por visibilidade condicional (collapse) e filtros, não por layouts distintos |
-| Prompts personalizados / transcrições | 🔲 Futuro |
-| Precificação do plano com painel | 🔲 Comercial, fora do escopo técnico |
+| 3 versões de layout por tipo de cliente | ⚠️ Resolvido por visibilidade condicional (collapse) e filtros, não por layouts distintos |
+| Prompts personalizados / transcrições | 🔴 Futuro |
+| Precificação do plano com painel | 🔴 Comercial, fora do escopo técnico |
 
 ## 7. Pendências
 
 ### Próximo grande passo
-- **Integração de insights BigQuery no painel**: transformar o protótipo de 02/07 em módulo real — `.jsw` de consulta (service account no Secrets, projeto `coevo-co`, tabelas `gold.gold_performance_diario` e `gold.gold_hotelaria_diario`, filtro por `Sigla` + `fase='vigencia'`), HtmlComponent com Chart.js, replicando o Looker «Gerenciamento Performance · Mídia». Atenções conhecidas: divergências GA4-direto × BQ (janela de atribuição), lógica «Saldo Google Ads» do Looker não esclarecida, histórico BQ começa em meados de 2025 (Looker/GA4 volta a 2023).
+- **📌 POC de migração React+Supabase (Disparos)** — 3–4 semanas, começa com setup do repo `coevo-gui/painel`, schema Supabase (espelhos de clientes/subclientes + tabelas nativas de disparos), sync near-realtime Wix→Supabase via hooks + reconciliação, port do backend (`emailDisparo.jsw` → `/api/*`), UI de 5 telas (listagem/novo/detalhe/métricas/análise), shadow run no fechamento do mês, decisão GO/NO-GO antes de Smart Briefing. Plano completo: **`docs/plano-poc-disparos-painel-coevo.md`**.
+
+- Após POC Disparos bem-sucedido: Smart Briefing → Núcleo → Painel em Dia → Insights BigQuery (integração nativa no novo painel, não protótipo isolado).
 
 ### Painel em Dia — Etapa 2 (frontend)
 - Web Method de leitura da coleção `versoes` (não existe; `painelEmDia.jsw` hoje só tem as funções Brevo) + nova página no portal exibindo o histórico de versões. Auto-inscrição no Brevo já está no ar (`events.js`).
 
-### Disparos de Cobrança
-- **Re-implementar paginação do `disparos.html`** — a tentativa anterior quebrou o arquivo e foi revertida (base de recuperação: commit `c879f3d54bdf0a0c27a1a824a3aacb16f01a995d`). Reabordar com edições cirúrgicas (nunca slicing Python `-1`), testando standalone (`?dev=true`) antes do upload.
+### Disparos de Cobrança (Wix)
+- **Re-implementar paginação do `disparos.html`** — a tentativa anterior quebrou o arquivo e foi revertida (base de recuperação: commit `c879f3d54bdf0a0c27a1a824a3aacb16f01a995d`). Com a migração, essa pendência vira obsoleta — o novo painel terá paginação nativa (Postgres + React).
 - Aberturas automáticas × humanas: Brevo não distingue nativamente (scanners/Apple MPP); horário e padrão de IP podem ser indicativos — refinamento futuro da análise IA.
 
-### Portal / cadastro
+### Portal / cadastro (Wix)
 - **Revisar as 16 entradas `a confirmar` na coleção `clientes`** (status atribuído em 02/06): confirmar dados, atualizar status ou remover.
 - **Divergência de rotas (verificar no Editor):** `Portal.w6koo.js` navega para `/portal/subcliente/{sigla}` e, na falha de auth de Envios, para `/portal`; masterPage/Editar/breadcrumbs usam `/cliente/{sigla}` e `/painel/*`. Confirmar as URLs reais das páginas e unificar os links no código.
 - Normalização contínua de emails (`emailFinanceiro`, `emailGerenteGeral`, `focalMktEmail`, `emailsCopia`): 47 subclientes já corrigidos (múltiplos emails separados por espaço causaram falha no CYAN); considerar validação periódica com separador vírgula.
 
 ### Infraestrutura / qualidade
-- **`permissions.json` libera invoke anônimo para todos os Web Methods (`"*"`)** — funções sensíveis (`enviarDisparos`, `deletarDisparo`, `criarDisparoComItens`…) dependem só do redirect da página para proteção. Revisar: restringir por função (ex.: emailDisparo → `siteMember`/checagem de nível no backend).
-- **Limpeza de legados (com GO do Gui):** `portal*.js` na raiz do repo (cópias pré-Git-Integration), `src/pages/portal-envios-novo.js` / `-detalhe.js` / `-envios.js` (abordagem antiga de páginas nativas, órfãos sem sufixo de página), `hotéis.eagur.js` vazio, `.DS_Store`.
-- **Versionar `smart-briefing.html` no repo** (hoje só existe colado no Editor) — mesmo padrão do `disparos.html` (`public/`), para histórico e recuperação.
-- Títulos SEO dinâmicos (`wix-seo`): tentativa de 02/06 não permaneceu no código atual — retomar se ainda desejado.
+- **`permissions.json` libera invoke anônimo para todos os Web Methods (`"*"`)** — funções sensíveis (`enviarDisparos`, `deletarDisparo`, `criarDisparoComItens`…) dependem só do redirect da página para proteção. Revisar: restringir por função (ex.: emailDisparo → `siteMember`/checagem de nível no backend). **Obsoleto com a migração.**
+- **Limpeza de legados (com GO do Gui):** `portal*.js` na raiz do repo (cópias pré-Git-Integration), `src/pages/portal-envios-novo.js` / `-detalhe.js` / `-envios.js` (abordagem antiga de páginas nativas, órfãos sem sufixo de página), `hotéis.eagur.js` vazio, `.DS_Store`. **Pode aguardar until fim POC.**
+- **Versionar `smart-briefing.html` no repo** (hoje só existe colado no Editor) — mesmo padrão do `disparos.html` (`public/`), para histórico e recuperação. **Novo painel herda isso.**
+- Títulos SEO dinâmicos (`wix-seo`): tentativa de 02/06 não permaneceu no código atual — retomar se ainda desejado. **Possível no novo painel via `react-helmet` ou similar.**
 
 ### Itens ✅ concluídos desde a versão anterior deste roadmap
 - ✅ **Resumo de IA nos resultados do disparo** — `gerarAnaliseDisparo` + tipo `ANALISE_DISPARO` no bridge (Haiku 4.5, com histórico comparativo).
 - ✅ **Fallback de subject matching suprimido** — `obterMetricasDisparo` retorna `semEnvios` quando `cmsEnviados === 0`; matching é exclusivamente por tag.
 - ✅ **`painelEmDia.jsw` populado** (inscrição + sync Brevo) e **auto-inscrição no cadastro** via `events.js`.
 - ✅ **«Responder para» obrigatório** no formulário de disparos (06/07).
+- ✅ **Tríade de documentação** (09/07): README reescrito, roadmap vivo, prompt-continuidade criado.
 
 ## 8. Log de milestones
 - **27/03/2026** — Reunião de aprovação: visão completa do Painel do Cliente (resumo executivo no projeto Claude). MVP evolutivo definido; Gui responsável.
@@ -126,7 +130,7 @@ Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `
 - **09/06** — **Smart Briefing fechado**: formulário dinâmico por categoria, Coevito com wiki ClickUp e prompt caching, task ClickUp com custom fields, anexos, 2 emails Brevo, `briefingLogs`, rascunho automático; descoberta do padrão de bridge do HtmlComponent. **Pauta de Tarefas fechada** no mesmo dia: `clickup.jsw` + página com 1 repeater e filtros client-side; aprendizados de Velo (expand/collapse em Section, cascata de borderColor).
 - **02/07** — **Protótipo Insights BigQuery**: dois artifacts com dados reais (CYAN) validam a arquitetura híbrida `.jsw` + HtmlComponent + Chart.js, replicando o Looker de performance; divergências e limitações mapeadas.
 - **01–06/07** — **Ciclo Disparos de Cobrança**: paginação quebrada revertida para a base `c879f3d`; **incidente PUT (01/07)** apaga dados de 67 subclientes AHI ao inserir `emailsCopia` em massa — recuperação por backups e consolidação das regras de segurança (§4); caso raiz: `ahi@coevo.co` ausente de `emailsCopia` dos 69 subclientes AHI. Em 06/07, «Responder para» torna-se obrigatório (5 edições em `disparos.html` + Velo) — commitado e re-upado no Media Manager.
-- **09/07** — **Tríade de documentação**: README reescrito com o estado real, roadmap convertido em documentação viva, `docs/prompt-continuidade.md` criado. Achados registrados: divergência de rotas, `permissions.json` aberto, legados a limpar, pendências antigas já implementadas marcadas ✅.
+- **09/07** — **Tríade de documentação**: README reescrito com o estado real, roadmap convertido em documentação viva, `docs/prompt-continuidade.md` criado. Achados registrados: divergência de rotas, `permissions.json` aberto, legados a limpar, pendências antigas já implementadas marcadas ✅. **Mesma data: decisão estratégica de migração para React+Supabase** — plano de POC do módulo Disparos redigido (`painel.coevo.co` em `coevo-gui/painel`, Vercel + Postgres + Supabase Auth), near-realtime sync Wix→Supabase via hooks, 3–4 semanas Fase 0–5, shadow run no fechamento do mês. Ordem: Disparos → Smart Briefing → Núcleo → Painel em Dia → Insights BigQuery. Pipeline `coevo-co` não é tocado no POC.
 
 ## 9. Insights empíricos
 - **PUT da Wix Data API é substituição total** — 1 campo enviado = todos os outros apagados. O erro custou uma reconstrução de base (67 registros AHI).
@@ -146,3 +150,4 @@ Coleções CMS: `clientes`, `subclientes`, `categoriaDocumento`, `documentos`, `
 - **Slicing Python com índice `-1` em arquivos grandes já corrompeu o `disparos.html`** — edições sempre cirúrgicas (str replace) e teste standalone antes do deploy.
 - **Prompt caching Anthropic** (`anthropic-beta: prompt-caching-2024-07-31`) reduziu custo do Coevito com a wiki no contexto.
 - **BigQuery**: toda consulta de performance exige `fase='vigencia'`; `Sigla` é a chave de junção universal; histórico BQ começa em meados de 2025.
+- **Novo painel (React+Supabase) elimina as dores do Wix** (PUT, deploy manual, HtmlComponent exótico, RLS impossível, no-versioning), mas introduz novas (infra Vercel, RLS complexa, custo escalar, responsabilidade de deploy). Tradeoff validado pelo sucesso do Vagô.
